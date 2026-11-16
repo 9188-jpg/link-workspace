@@ -34,9 +34,16 @@ try{
  await req('/shared-demo',undefined,'',{method:'HEAD'});assert.equal((await json('/api/workspace')).stats.visits,0);
  const publicShare=new URL(browserShareUrl(origin+'/shared-demo'));
  let publicPage=await req(publicShare.pathname+publicShare.search),html=await publicPage.text();assert.equal(publicPage.status,200);assert(html.includes('点击跳转'));assert(html.includes('&lt;script&gt;escaped&lt;/script&gt;'));assert(html.includes('q=1#fragment'));assert(!html.includes('lk_jump_to_browser'),'share flags must not alter the target');
- const browserCookie=cookies(publicPage);await req('/shared-demo',undefined,browserCookie);assert.equal((await json('/api/workspace')).stats.visits,1,'public visits must deduplicate');
+ assert.equal((await json('/api/workspace')).stats.visits,0,'HTTP loading alone is not a confirmed visit');
+ const token=html.match(/const eventToken="([^"]+)"/)[1],browserCookie=cookies(publicPage);
+ const arrivals=await Promise.all(Array.from({length:8},()=>req('/api/public/event',{token,kind:'arrival'})));assert(arrivals.every(r=>r.status===200));
+ await req('/shared-demo',undefined,browserCookie);const noCookie=await (await req('/shared-demo')).text();await req('/api/public/event',{token:noCookie.match(/const eventToken="([^"]+)"/)[1],kind:'arrival'});
+ assert.equal((await json('/api/workspace')).stats.visits,1,'refreshes, concurrent reports and missing cookies must deduplicate');
+ const preview=await (await req('/shared-demo',undefined,'',{headers:{'User-Agent':'Twitterbot/1.0'}})).text();await req('/api/public/event',{token:preview.match(/const eventToken="([^"]+)"/)[1],kind:'arrival'});assert.equal((await json('/api/workspace')).stats.visits,1,'platform previews cannot produce measured visits');
+ await req('/api/public/event',{token,kind:'click'});await req('/api/public/event',{token,kind:'click'});assert.equal((await json('/api/features?section=overview')).totals.find(r=>r.kind==='click').total,1);
+ assert.equal((await json('/api/workspace?traffic=legacy')).stats.visits,0);
  const directShare=new URL(browserShareUrl(origin+'/direct-demo'));
- const directPage=await req(directShare.pathname+directShare.search);assert.equal(directPage.status,200);const directHtml=await directPage.text();assert(directHtml.includes('location.replace("https://example.org/")'));assert(!directHtml.includes('lk_jump_to_browser'),'share flags must not alter the target');
+ const directPage=await req(directShare.pathname+directShare.search);assert.equal(directPage.status,200);const directHtml=await directPage.text();assert(directHtml.includes('location.replace("https://example.org/")'));assert(!directHtml.includes('lk_jump_to_browser'),'share flags must not alter the target');const directToken=directHtml.match(/token:"([^"]+)"/)[1];await req('/api/public/event',{token:directToken,kind:'redirect'});const directStats=await json('/api/features?section=overview');assert.equal(directStats.totals.find(r=>r.kind==='click').total,1,'automatic redirects are not button clicks');assert.equal(directStats.totals.find(r=>r.kind==='redirect').total,1);
  await json('/api/workspace',{action:'settings.save',registration:true,fallback:''});
  const member=await req('/auth/register',{username:'member',password});assert.equal(member.status,200,await member.clone().text());memberCookie=cookies(member);
  const memberData=await json('/api/workspace',undefined,memberCookie);assert(!memberData.user.admin);assert.equal(memberData.items.length,0);

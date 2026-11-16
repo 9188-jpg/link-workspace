@@ -6,28 +6,29 @@ function error(e:any){return response({error:e.message?.includes('UNIQUE constra
 export async function GET(req:Request){try{
  const u=await user(req),s=scope(u),p=new URL(req.url).searchParams;
  const domainId=p.get('domain')||'',search=(p.get('q')||'').slice(0,200),kind=p.get('view')||'links';
- const domains=await all(`SELECT d.*, (SELECT count(*) FROM links l WHERE l.domain_id=d.id AND l.deleted_at IS NULL AND ${s.sql}) total, (SELECT count(*) FROM visits v JOIN links l ON l.id=v.link_id WHERE l.domain_id=d.id AND ${s.sql}) visits FROM domains d WHERE (?=1 OR d.owner_id IS NULL OR d.owner_id=?) ORDER BY d.created_at`,...s.args,...s.args,u.admin?1:0,u.id);
+ const verified=p.get('traffic')==='legacy'?0:1;
+ const domains=await all(`SELECT d.*, (SELECT count(*) FROM links l WHERE l.domain_id=d.id AND l.deleted_at IS NULL AND ${s.sql}) total, (SELECT count(*) FROM visits v JOIN links l ON l.id=v.link_id WHERE v.verified=${verified} AND l.domain_id=d.id AND ${s.sql}) visits FROM domains d WHERE (?=1 OR d.owner_id IS NULL OR d.owner_id=?) ORDER BY d.created_at`,...s.args,...s.args,u.admin?1:0,u.id);
  const filters=`${s.sql} AND (?='' OR l.domain_id=?)`,args=[...s.args,domainId,domainId];
  const stats=await one(`SELECT count(*) total,coalesce(sum(CASE WHEN l.enabled=1 AND d.status!='disabled' AND u.enabled=1 THEN 1 ELSE 0 END),0) active FROM links l JOIN domains d ON d.id=l.domain_id JOIN users u ON u.id=l.owner_id WHERE l.deleted_at IS NULL AND ${filters}`,...args);
- stats.visits=(await one(`SELECT count(*) n FROM visits v JOIN links l ON l.id=v.link_id WHERE ${filters}`,...args)).n;
+ stats.visits=(await one(`SELECT count(*) n FROM visits v JOIN links l ON l.id=v.link_id WHERE v.verified=${verified} AND ${filters}`,...args)).n;
  stats.users=u.admin?(await one('SELECT count(*) n FROM users WHERE id!=?',u.id)).n:undefined;
- let result:any={user:{id:u.id,name:u.name,email:u.email,admin:u.admin},domains,stats};
+ let result:any={user:{id:u.id,name:u.name,email:u.email,admin:u.admin},domains,stats,traffic:verified?'verified':'legacy'};
  if(kind==='links'){
- const rows=await all(`SELECT l.*,d.origin,d.host,d.status domain_status,u.name owner_name,u.enabled owner_enabled,(SELECT count(*) FROM visits WHERE link_id=l.id) visits FROM links l JOIN domains d ON d.id=l.domain_id JOIN users u ON u.id=l.owner_id WHERE l.deleted_at IS NULL AND ${filters} AND (?='' OR instr(lower(l.title||' '||l.target||' '||l.slug),lower(?))>0) ORDER BY l.created_at DESC`,...args,search,search);result.items=await features.enrich(rows);
+ const rows=await all(`SELECT l.*,coalesce(d.public_origin,d.origin) origin,d.host,d.status domain_status,u.name owner_name,u.enabled owner_enabled,(SELECT count(*) FROM visits WHERE verified=${verified} AND link_id=l.id) visits FROM links l JOIN domains d ON d.id=l.domain_id JOIN users u ON u.id=l.owner_id WHERE l.deleted_at IS NULL AND ${filters} AND (?='' OR instr(lower(l.title||' '||l.target||' '||l.slug),lower(?))>0) ORDER BY l.created_at DESC`,...args,search,search);result.items=await features.enrich(rows);
  }
  if(kind==='analytics'){
  const from=p.get('from')||day(),to=p.get('to')||day();
  const valid=(v:string)=>/^\d{4}-\d{2}-\d{2}$/.test(v)&&!isNaN(Date.parse(v))&&new Date(v).toISOString().slice(0,10)===v;
  if(!valid(from)||!valid(to)||from>to||to>day()||(Date.parse(to)-Date.parse(from))/86400000>365)fail('请选择不超过 366 天的有效日期范围');
- const daily=await all(`SELECT v.day,count(*) visits FROM visits v JOIN links l ON l.id=v.link_id WHERE ${filters} AND v.day BETWEEN ? AND ? GROUP BY v.day ORDER BY v.day`,...args,from,to);
+ const daily=await all(`SELECT v.day,count(*) visits FROM visits v JOIN links l ON l.id=v.link_id WHERE v.verified=${verified} AND ${filters} AND v.day BETWEEN ? AND ? GROUP BY v.day ORDER BY v.day`,...args,from,to);
  const dates=[];for(let t=Date.parse(from);t<=Date.parse(to);t+=86400000)dates.push(new Date(t).toISOString().slice(0,10));
  result.daily=dates.map(date=>({date,visits:daily.find(x=>x.day===date)?.visits||0}));
- result.items=await all(`SELECT l.id,l.title,l.slug,d.origin,d.host,l.deleted_at,count(v.id) visits FROM links l JOIN domains d ON d.id=l.domain_id LEFT JOIN visits v ON v.link_id=l.id AND v.day BETWEEN ? AND ? WHERE ${filters} AND (?='' OR instr(lower(l.title||' '||l.slug),lower(?))>0) GROUP BY l.id ORDER BY visits DESC,l.created_at DESC`,from,to,...args,search,search);
- if(p.get('link')){const link=await one(`SELECT l.id FROM links l WHERE l.id=? AND ${filters}`,p.get('link'),...args);if(!link)fail('链接不存在',404);const list=await all('SELECT day,count(*) visits FROM visits WHERE link_id=? AND day BETWEEN ? AND ? GROUP BY day',link.id,from,to);result.detail=dates.map(date=>({date,visits:list.find(x=>x.day===date)?.visits||0}));}
+ result.items=await all(`SELECT l.id,l.title,l.slug,coalesce(d.public_origin,d.origin) origin,d.host,l.deleted_at,count(v.id) visits FROM links l JOIN domains d ON d.id=l.domain_id LEFT JOIN visits v ON v.link_id=l.id AND v.verified=${verified} AND v.day BETWEEN ? AND ? WHERE ${filters} AND (?='' OR instr(lower(l.title||' '||l.slug),lower(?))>0) GROUP BY l.id ORDER BY visits DESC,l.created_at DESC`,from,to,...args,search,search);
+ if(p.get('link')){const link=await one(`SELECT l.id FROM links l WHERE l.id=? AND ${filters}`,p.get('link'),...args);if(!link)fail('链接不存在',404);const list=await all(`SELECT day,count(*) visits FROM visits WHERE verified=${verified} AND link_id=? AND day BETWEEN ? AND ? GROUP BY day`,link.id,from,to);result.detail=dates.map(date=>({date,visits:list.find(x=>x.day===date)?.visits||0}));}
  }
  if(kind==='users'){requireAdmin(u);result.items=await all('SELECT id,name,email,enabled,created_at,(SELECT count(*) FROM links WHERE owner_id=users.id AND deleted_at IS NULL) link_count FROM users ORDER BY created_at');}
  if(kind==='settings'){requireAdmin(u);result.settings=Object.fromEntries((await all("SELECT key,value FROM settings WHERE key IN ('registration','fallback')")).map(x=>[x.key,x.value]));}
- result.sparkline=await all(`SELECT v.day,count(*) visits FROM visits v JOIN links l ON l.id=v.link_id WHERE ${s.sql} AND v.timestamp>=? GROUP BY v.day ORDER BY v.day`,...s.args,Date.now()-7*86400000);result.groups=(await features.read(new Request(new URL('/api/features?section=groups',req.url)),u)).items;result.templates=await all("SELECT id,name,owner_id FROM documents WHERE kind='template' AND published IS NOT NULL AND deleted_at IS NULL AND owner_id=?",u.id);return response(result);
+ result.sparkline=await all(`SELECT v.day,count(*) visits FROM visits v JOIN links l ON l.id=v.link_id WHERE v.verified=${verified} AND ${s.sql} AND v.timestamp>=? GROUP BY v.day ORDER BY v.day`,...s.args,Date.now()-7*86400000);result.groups=(await features.read(new Request(new URL('/api/features?section=groups',req.url)),u)).items;result.templates=await all("SELECT id,name,owner_id FROM documents WHERE kind='template' AND published IS NOT NULL AND deleted_at IS NULL AND owner_id=?",u.id);return response(result);
  }catch(e){return error(e);}}
 export async function POST(req:Request){try{
  mutationGuard(req);const u=await user(req);if(Number(req.headers.get('content-length')||0)>131072)fail('请求内容过大');const b=await req.json() as any;

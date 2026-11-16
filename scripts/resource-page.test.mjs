@@ -18,7 +18,7 @@ test('normal browsers keep the exact web destination and never request a native 
 
 test('Android in-app handoff contains the exact share, including extraction code and fragment',()=>{
  const d=resourceDestination(target,android);assert.equal(d.launch,'quark://open?url='+encodeURIComponent(target));assert.equal(d.appLaunch,true);
- assert(render().includes('不打开应用，访问网页版'));assert(render().includes('referrerpolicy="no-referrer"'));assert(!render().includes('lk_jump_to_browser'));
+ assert(!render().includes('不打开应用，访问网页版'));assert(!render().includes('id="web-resource"'));assert(!render().includes('如果没有这个选项'));assert(render().includes('在浏览器中打开'));assert(render().includes('referrerpolicy="no-referrer"'));assert(!render().includes('lk_jump_to_browser'));
 });
 
 test('iOS handoff preserves the share ID, extraction code, and exact web fallback',()=>{
@@ -54,15 +54,15 @@ function runtime({ua=android,clipboard=true,copySuccess=true}={}){
  return {elements,writes,timers,syncCopies:()=>syncCopies};
 }
 
-test('loading the page performs no clipboard write, timer, or automatic navigation',()=>{
- const r=runtime();assert.equal(r.writes.length,0);assert.equal(r.syncCopies(),0);assert.equal(r.timers.length,0);
+test('loading the page performs no clipboard write, clipboard action or automatic navigation',()=>{
+ const r=runtime();assert.equal(r.writes.length,0);assert.equal(r.syncCopies(),0);assert.equal(r.timers.length,1);
  assert.equal(typeof r.elements['open-resource'].events.click,'function');
- const normal=runtime({ua:safari});normal.elements['open-resource'].events.click();assert.equal(normal.timers.length,0);assert.equal(normal.syncCopies(),0);
+ const normal=runtime({ua:safari});normal.elements['open-resource'].events.click();assert.equal(normal.timers.length,1);assert.equal(normal.syncCopies(),0);
 });
 
-test('both copy buttons copy the target, not the short link or app handoff',async()=>{
- const r=runtime();await r.elements['copy-resource'].events.click();await r.elements['copy-browser-link'].events.click();
- assert.deepEqual(r.writes,[target,target]);assert.equal(r.elements['copy-label'].textContent,'已复制');
+test('the copy button copies the target, not the short link or app handoff',async()=>{
+ const r=runtime();await r.elements['copy-resource'].events.click();
+ assert.deepEqual(r.writes,[target]);assert.equal(r.elements['copy-label'].textContent,'已复制');
 });
 
 test('clipboard denial falls back to selection and never reports false success',async()=>{
@@ -71,6 +71,10 @@ test('clipboard denial falls back to selection and never reports false success',
 });
 
 test('native handoff makes one click request and does not claim it succeeded',()=>{
- const r=runtime();r.elements['open-resource'].events.click();assert.equal(r.syncCopies(),1);assert.equal(r.timers.length,1);
- assert(r.elements['resource-status'].textContent.includes('尝试'));r.timers[0]();assert(r.elements['resource-status'].textContent.includes('如未打开'));
+ const r=runtime();r.elements['open-resource'].events.click();assert.equal(r.syncCopies(),1);assert.equal(r.timers.length,2);
+ assert(r.elements['resource-status'].textContent.includes('尝试'));r.timers.at(-1)();assert(r.elements['resource-status'].textContent.includes('如未打开'));
 });
+
+test('resource header uses the link title and the requested concise fallback wording',()=>{const page=render(android,'我的链接标题');assert(page.includes('<strong id="resource-title">我的链接标题</strong>'));assert(!page.includes('<h1 id="resource-title">'));assert(page.includes('若未自动打开，请复制链接在浏览器中打开。'));assert(!page.includes('也可以复制网盘链接，稍后访问。'));});
+
+test('all browser contexts show the three requested reference areas consistently',()=>{for(const ua of ['',android,iphone,safari]){const page=render(ua);assert(page.includes('<span class="dot"></span>点击获取资源</div>'));assert(page.includes('点击下方按钮获取资源；若未自动打开，请复制链接在浏览器中打开。'));assert(!page.includes('你的资源，已准备就绪'));assert(!page.includes('确认下方链接，点击按钮继续访问。'));assert(page.includes('点击下方右侧的'));assert(page.includes('按钮，选择「在浏览器中打开」。'));assert(page.includes('<section class="guide"'));assert(!page.includes('<details class="guide"'));assert(!page.includes('id="copy-browser-link"'));}});

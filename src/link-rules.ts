@@ -1,2 +1,2 @@
 export const reserved=new Set(['admin','dashboard','api','signin-with-chatgpt','signout-with-chatgpt','callback','favicon.svg','_next','assets','auth','healthz','setup','register','p','partner','media','legal']);
-export function randomCode(){const values=crypto.getRandomValues(new Uint8Array(8)),alphabet='abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789';return Array.from(values,n=>alphabet[n%alphabet.length]).join('');}
+export function randomCode(){const values=crypto.getRandomValues(new Uint8Array(6)),alphabet='abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789';return Array.from(values,n=>alphabet[n%alphabet.length]).join('');}

@@ -1,0 +1,1 @@
+export default {fetch(req){const url=new URL(req.url);url.protocol='https:';url.host='link-share-9188.pages.dev';return new Response(null,{status:302,headers:{Location:url.href,'Cache-Control':'no-store','Referrer-Policy':'no-referrer','X-Robots-Tag':'noindex, nofollow','X-Content-Type-Options':'nosniff'}});}};
