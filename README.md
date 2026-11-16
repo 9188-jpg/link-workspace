@@ -20,6 +20,14 @@ Cloudflare Workers 的默认 workers.dev 地址未通过接收者手机访问测
 
 所有者已在手机飞书实测确认：带上述参数的有效测试短链会切到系统浏览器，并正常打开百度。此结论只覆盖本次实际测试的客户端环境。
 
+## X 外部浏览器兼容性测试（尚未验收）
+
+测试页： https://link-share-9188.pages.dev/assets/x-browser-test.html 。从真实手机 X 客户端进入后，分别测试安卓默认浏览器 Intent、已安装 Chrome 的显式 Intent，以及 iPhone Safari scheme / 已安装 Chrome 的 scheme。到达页为 `/assets/browser-arrival.html`，加载该页本身不能证明切出了 X，必须核实独立浏览器应用实际启动。
+
+目前只发布隔离测试页，未添加“X 强制跳转”功能或改动业务短链。安卓机制参考 [Chrome Intent 文档](https://developer.chrome.com/docs/android/intents)；iOS Chrome scheme 参考 [Chromium 官方说明](https://chromium.googlesource.com/chromium/src.git/+/master/docs/ios/opening_links.md)。Safari `x-safari-https` 为实验候选，不是已经确认的 X 官方接口，不承诺系统默认浏览器或所有 iOS 版本可用。点击按钮遵循客户端的正常应用打开流程，不使用自动循环唤起、签名复用或安全告警绕过。
+
+验收目标是安卓与 iPhone 的 X 客户端均实际切到外部浏览器并打开有效目标；普通网页中转、复制指引或只加载出到达页均不能代替该目标。`scripts/build-pages.mjs` 将 `cloudflare/browser-probe` 下的静态测试页一起复制进发布目录。
+
 ## Cloudflare Pages 免费部署
 
 ```text
