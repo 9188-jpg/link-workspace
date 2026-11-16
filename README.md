@@ -1,50 +1,59 @@
-# 短链工作台 · Render 独立版
+# 短链工作台 · 免费方案
 
-React + Node.js 24 + SQLite。独立账号及密码登录、HttpOnly 会话、公开短链、多域名、直接跳转与中转页、按北京时间统计、用户管理及设置。普通访客打开短链不需要账号。
+React 前端、独立账号登录、多域名短链、直接跳转及中转页、访问统计、用户管理和账号设置。短链访客无需登录。
 
-这是新系统，未复制或改动原站的域名、短链和统计数据。
+默认路线只使用免费额度：Cloudflare Workers + D1 持久化数据库。若接收者的网络无法访问 `workers.dev`，可用 Render Free 作为无状态入口，把请求交给同一免费后端。Render 入口不保存数据库，不配置磁盘，不使用收费 Web 实例。
 
-## Render 部署
+**当前阶段：** `render.yaml` 的 `WORKER_ORIGIN` 指向连通性测试页。先验证手机能访问免费入口，再切换到完整后端。仅部署成功不代表接收者网络可用。
 
-仓库必须只包含本目录的内容。选择 **Web Service / 网络服务**，连接本仓库：
+本项目未复制或改动原站正在使用的短链、域名或统计。仓库不包含真实密码、密钥或数据库文件。
 
-- Node.js：24.22.1
-- 构建命令：`npm ci --include=dev && npm run build`
-- 启动命令：`npm start`
-- 健康检查：`/healthz`
-- 持久化磁盘：挂载 `/var/data`，建议初始 1 GB。
-- 环境变量：`DATA_DIR=/var/data`，`SETUP_TOKEN` 为至少 24 位的随机密钥。Blueprint 会生成该密钥。
-- 公开域名默认读取 Render 提供的 `RENDER_EXTERNAL_URL`；使用自定义域名时设 `PUBLIC_ORIGIN=https://你的域名`。服务只允许 HTTP(S) 目标。
+## Cloudflare 免费后端
 
-**费用：** `render.yaml` 使用 `0.5c-512mb` Web Service 和 1 GB 持久化磁盘，它们不是免费资源。按核对时的服务基础价 $7/月与磁盘 $0.25/GB/月，基础费用约 $7.25/月，另有可能的税费、超额流量及工作区套餐费用。正式创建前先核对 Render 创建页价格并由所有者确认费用。免费 Web Service 的本地文件会在重启/重新部署后丢失，不适合直接保存本系统的数据库，因此不要以免费套餐直接运行正式短链。
-
-部署后访问 `/setup`。在 Render 环境变量里查看 `SETUP_TOKEN`，由站点所有者亲自输入初始化密钥并设置管理员账号与密码（至少 12 位）。初始化入口只允许创建一次管理员；未知访客无法抢占管理员。密码使用独立随机盐和 scrypt 派生保存，不保存明文。默认关闭注册。
-
-仓库不应上传 `.env`、数据文件或真实密码。GitHub 仓库可以保持私有，由 Render 的 GitHub 集成读取。
-
-## 本地运行及验证
-
-```powershell
-npm ci
+```text
+npm ci --include=dev
 npm run build
-$env:SETUP_TOKEN='替换成足够长的随机初始化密钥'
-$env:DATA_DIR='./data'
-npm start
+npx wrangler login
+npx wrangler d1 migrations apply link-workspace-db --remote
+npx wrangler secret put SETUP_TOKEN
+npx wrangler deploy
 ```
 
-默认端口 3000，服务监听 `0.0.0.0`，生产使用 Render 注入的 `PORT`。本地访问 `http://127.0.0.1:3000`。本地测试使用临时隔离数据库，不使用正式数据：
+`wrangler.jsonc` 中的 D1 属于本项目所有者账号；其他人部署时需创建自己的 D1 并替换数据库 ID。迁移只创建表结构，没有业务种子数据。只选择 Workers Free，不启用付费计划、R2 或付费数据库。
+
+`SETUP_TOKEN` 需至少 24 位随机字符，仅由所有者保管。在首次访问 `/setup` 时由所有者亲自输入该密钥并设置管理员账号和密码。初始化只允许一次。密码采用随机盐和 Web Crypto PBKDF2-HMAC-SHA256（600,000 次）派生保存；会话 Cookie 为 HttpOnly、SameSite，HTTPS 下为 Secure。改密会撤销其他会话。
+
+若入口为 Render，把 Worker 的 `PUBLIC_ORIGIN` 变量设为实际 `https://xxx.onrender.com` 网址，再重新部署。这样创建的短链使用接收者可访问的入口域名，后台仍要求独立登录及服务端权限校验。
+
+## Render Free 可选入口
+
+根目录 `render.yaml` 明确指定 `plan: free`，没有磁盘和收费数据库：
+
+- 构建：`node --check cloudflare/proxy.mjs`
+- 启动：`node cloudflare/proxy.mjs`
+- 健康检查：`/healthz`
+- `WORKER_ORIGIN`：后端 Worker 的 HTTPS 网址。验证通过后再由测试页切换到完整后端。
+
+入口只转发到配置的 `workers.dev` 后端，不是任意网址代理。请求有体积及超时限制，登录和同源校验仍在后端执行。
+
+Render 免费服务闲置后会休眠，首次唤醒通常约一分钟。仅使用免费服务，不添加付款方式，不开通付费工作区；免费额度不足则停止或暂停，不自动升级为收费方案。Cloudflare Free 达到相应请求或 D1 读写额度时也会受限。
+
+## 验证
 
 ```text
 npm run check
+npm run build
 npm test
+node scripts/smoke-test.mjs --cloudflare
+npx wrangler deploy --dry-run
 ```
 
-测试包含初始化令牌、账号登录、匿名访问、权限隔离、两种跳转、重复访问去重、软删除保留统计和重启后数据保留。
+两套测试均使用隔离本地数据库，包含初始化校验、匿名访问、权限隔离、两种跳转、HTML 转义、去重、HEAD 不计数、停用/软删除、历史保留、改密会话失效、注销及重启后数据保留。Cloudflare 测试只使用本地 D1，绝不写入远程数据库。
 
-## 数据和运营
+`src/server.ts` 保留为可自行托管的 Node + SQLite 版本，`cloudflare/worker.ts` 为免费 Worker 版本；二者共享界面及业务行为，认证和存储实现不同。Node 本地运行时设置私有 `SETUP_TOKEN` 和 `DATA_DIR`，生产持久化方式需自行配置。
 
-数据文件为 `DATA_DIR/workspace.sqlite`（含 SQLite WAL 文件）。维护数据库备份时使用 SQLite 一致性备份方式，不能只复制正在写入的单一主文件。新增业务表结构应追加版本化迁移。
+## 数据
 
-添加域名记录只登记短码空间，还需要在 Render 配置该域名及 DNS。将域名从正常改为暂停新增，已有短链仍可访问；停用域名则停止全部相关短链。停用账号也会阻止其短链访问。
+按北京时间统计；同浏览器同短链滚动 10 分钟去重。HEAD 请求不计数，访问数不代表目标网址加载成功。删除链接后保留历史。域名暂停新增不影响已有链接；停用域名或账号会阻止其相关短链。认证限流标识经哈希后保存，不记录访客明文 IP。
 
-同浏览器、同短链滚动 10 分钟去重，HEAD 不计数。计数代表短链请求，不代表目标网站成功加载。不收集访客 IP；禁用 Cookie 可能重复计数。
+数据备份使用 D1 导出及其支持的恢复方式。新增域名记录仍需相应域名的 DNS 和托管绑定。
