@@ -6,6 +6,10 @@ React 前端、独立账号登录、多域名短链、直接跳转及中转页�
 
 Cloudflare Workers 的默认 workers.dev 地址未通过接收者手机访问测试，因此不作为当前分享入口。Render 账号要求银行卡验证，所有者选择不绑定，所以当前不启用 Render。
 
+另一个免费入口为 https://link-share-9188.pages.dev/ ，部署配置在 `cloudflare/pages-share/wrangler.jsonc`。两个项目共用 D1 和相同的 `AUTH_PEPPER` secret，使用同一套账号和数据，但浏览器需在各域名分别登录。更新代码后须分别部署两个 Pages 项目。第二个入口不要设置 `PUBLIC_ORIGIN`，这样每个域名的短码按实际访问域名解析。
+
+新域名已登记为非默认的“备用分享域名”，不会更改原默认域名或旧短链；新建短链时在域名选项中选择它。原域名下的短码不会自动复制到新域名。第二个项目的发布命令为 `npx wrangler pages deploy --cwd cloudflare/pages-share --project-name link-share-9188 --branch main`。两个项目仍共享账号免费额度。
+
 本项目未复制或改动原站正在使用的短链、域名或统计。仓库不包含真实密码、密钥或数据库文件。
 
 ## Cloudflare Pages 免费部署
