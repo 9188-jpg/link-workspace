@@ -1,3 +1,4 @@
+import {DatabaseSync} from 'node:sqlite';
 import assert from 'node:assert/strict';
 import {spawn,execFile} from 'node:child_process';
 import {promisify} from 'node:util';
@@ -63,8 +64,21 @@ try{
  const change=await req('/auth/password',{currentPassword:password,password:newPassword},session);assert.equal(change.status,200);assert.equal((await req('/api/workspace',undefined,session)).status,401,'password changes must revoke old sessions');
  const newSession=cookies(change);assert((await json('/api/workspace',undefined,newSession)).user.admin);
  assert.equal((await req('/auth/login',{username:'admin',password})).status,401);assert.equal((await req('/auth/login',{username:'admin',password:newPassword})).status,200);
+ // Seed only this isolated test database with distinct visitors on separate Beijing dates.
+ const today=new Intl.DateTimeFormat('sv-SE',{timeZone:'Asia/Shanghai',year:'numeric',month:'2-digit',day:'2-digit'}).format(new Date()),yesterday=new Date(Date.parse(today)-86400000).toISOString().slice(0,10),emptyDay=new Date(Date.parse(today)-2*86400000).toISOString().slice(0,10);
+ const seedRows=[];for(const [id,n,verified] of [[link.id,2,1],[direct.id,3,1],[link.id,4,0]])for(let i=0;i<n;i++)seedRows.push([randomBytes(16).toString('hex'),id,'daily-test-'+verified+'-'+i,yesterday,Date.parse(yesterday+'T12:00:00+08:00')+i,verified]);
+ if(cloudflare){const quote=v=>typeof v==='number'?String(v):"'"+String(v).replaceAll("'","''")+"'",command=seedRows.map(row=>'INSERT INTO visits(id,link_id,browser,day,timestamp,verified) VALUES('+row.map(quote).join(',')+')').join(';');await execute(process.execPath,['node_modules/wrangler/bin/wrangler.js','d1','execute','link-workspace-db','--local','--persist-to',directory,'--command',command],{cwd:root,env:{...process.env,WRANGLER_SEND_METRICS:'false'},timeout:45000});}
+ else{const testDb=new DatabaseSync(resolve(directory,'workspace.sqlite'));for(const row of seedRows)testDb.prepare('INSERT INTO visits(id,link_id,browser,day,timestamp,verified) VALUES(?,?,?,?,?,?)').run(...row);testDb.close();}
+ const dailyParams='?'+new URLSearchParams({view:'analytics',from:emptyDay,to:today});
+ const dailyResult=await json('/api/workspace'+dailyParams,undefined,newSession);assert.deepEqual(dailyResult.daily.map(d=>d.visits),[0,5,2]);assert.equal(dailyResult.items.find(x=>x.id===link.id).visits,3);assert.equal(dailyResult.items.find(x=>x.id===direct.id).visits,4);
+ assert.deepEqual(dailyResult.linkDaily.filter(x=>x.link_id===link.id).map(x=>[x.date,x.visits]),[[yesterday,2],[today,1]]);assert.equal(dailyResult.linkDaily.reduce((n,x)=>n+x.visits,0),7);
+ const linkDetail=await json('/api/workspace'+dailyParams+'&link='+link.id,undefined,newSession);assert.deepEqual(linkDetail.detail.map(x=>x.visits),[0,2,1]);assert(linkDetail.items.some(x=>x.id===link.id&&x.deleted_at),'deleted link daily history must remain visible');
+ const searched=await json('/api/workspace'+dailyParams+'&q=shared-demo',undefined,newSession);assert(searched.linkDaily.every(x=>x.link_id===link.id));assert.equal(searched.items.length,1);
+ const legacyDaily=await json('/api/workspace'+dailyParams+'&traffic=legacy',undefined,newSession);assert.equal(legacyDaily.linkDaily.reduce((n,x)=>n+x.visits,0),4);
+ const isolatedDaily=await json('/api/workspace'+dailyParams,undefined,memberCookie);assert.equal(isolatedDaily.linkDaily.length,0);assert.equal((await req('/api/workspace'+dailyParams+'&link='+link.id,undefined,memberCookie)).status,404);
+ const emptyDomainDaily=await json('/api/workspace'+dailyParams+'&domain=no-such-domain',undefined,newSession);assert.equal(emptyDomainDaily.linkDaily.length,0);assert.equal(emptyDomainDaily.items.length,0);
  await req('/auth/logout',undefined,newSession);assert.equal((await req('/api/workspace',undefined,newSession)).status,401);
- console.log('PASS: isolated bootstrap, secure login/session, anonymous public links, role/ownership checks, direct and page redirects, escaping, deduplication, HEAD, disable/delete, retained analytics, validation, CSRF, restart persistence and logout.');
+ console.log('PASS: isolated bootstrap, secure login/session, anonymous public links, role/ownership checks, direct and page redirects, escaping, deduplication, HEAD, disable/delete, per-link multi-day analytics with zero days, domain/search/owner isolation, legacy separation, retained analytics, validation, CSRF, restart persistence and logout.');
 }finally{await stop();}
 
 
