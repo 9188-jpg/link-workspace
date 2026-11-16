@@ -10,7 +10,7 @@
     "build": "vite build",
     "start": "node src/server.ts",
     "check": "tsc --noEmit",
-    "test": "node --test scripts/share-url.test.mjs && node scripts/smoke-test.mjs",
+    "test": "node --test scripts/share-url.test.mjs scripts/resource-page.test.mjs && node scripts/smoke-test.mjs",
     "cf:dev": "wrangler dev --ip 127.0.0.1",
     "cf:build": "npm run build && wrangler deploy --dry-run",
     "cf:pages-build": "node scripts/build-pages.mjs"

@@ -22,6 +22,16 @@ Cloudflare Workers 的默认 workers.dev 地址未通过接收者手机访问测
 
 所有者已在手机飞书实测确认：带上述参数的有效测试短链会切到系统浏览器，并正常打开百度。此结论只覆盖本次实际测试的客户端环境。
 
+## 资源中转页
+
+选择“中转页”的短链统一使用资源入口：链接标题、点击获取资源、真实目标链接复制和“在浏览器中打开”指引。普通浏览器显示网页版入口；检测到手机应用内浏览器且目标为 HTTPS `pan.quark.cn/s/...` 分享时，点击获取资源才尝试唤起夸克，同时提供独立的网页版入口。其他目标仍使用普通 HTTP(S) 访问。
+
+安卓使用 `quark://open?url=...`；iOS 使用夸克公开分享页的 UC HTTPS handoff 格式，应用唤起失败的最终 fallback 仍为原分享。不会自动循环唤起、自动下载或载入第三方脚本。复制功能优先 Clipboard API，失败时选中文字尝试复制，再失败则提示长按复制，不伪报成功。链接和标题转义，保留提取码和 URL 片段。页面保持 `no-referrer` 与 nonce CSP，不接收查询参数改写目标。
+
+这是按参考站交互升级的资源页，不是强制切出 X 或改变 IP 的实现。应用内识别依赖 User-Agent，夸克原生唤起及 iPhone 兼容性仍需真机验收。已有链接的目标、两种模式、权限和统计规则均保留；无需数据库迁移。新旧 `page` 模式链接都会显示新资源页，`direct` 模式继续立即前往目标。
+
+`src/resource-page.ts` 同时供 Node 和 Cloudflare 使用；`scripts/resource-page.test.mjs` 验证不同设备分支、目标与提取码保留、转义、复制回退和点击前无唤起。模拟运行不代表真机应用唤起成功。
+
 ## X 外部浏览器兼容性测试（尚未验收）
 
 GitHub 实现对照测试：`/assets/github-browser-test.html`。安卓 `?run=android-auto` 在页面加载时单次发起 `astro-inapp-escape` 同结构的无 package 精简 Intent；页面按钮可对照用户点击场景。iPhone 测试仅是 `inapp-debugger` 记载的 Safari scheme 候选，不能宣称 X 已支持。所有方法统一指向新建的 `/github-browser-1116` 中转验收短链，显示中转页后用户再点百度，避免与直接唤起夸克混淆。电脑端不会发起手机协议。
