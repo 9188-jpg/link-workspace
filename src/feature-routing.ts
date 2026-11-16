@@ -1,3 +1,4 @@
+import {cleanGuideTexts} from './resource-copy.ts';
 import {measurableRequest} from './traffic.ts';
 import {type FeatureContext,type Row,statements,fail,safeUrl,text,uid,day,htmlPage,e,js,reply} from './feature-types.ts';
 const encoder=new TextEncoder();
@@ -18,7 +19,7 @@ export function cleanOptions(input:any){
  if(['weighted','failover'].includes(strategy)&&!targets.length)fail('此分流方式至少需要一个候选目标');
  const expires=source.expires?Number(source.expires):null;if(expires&&(!Number.isSafeInteger(expires)||expires<0))fail('有效期格式不正确');
  const limit=Number(source.limit)||0;if(!Number.isSafeInteger(limit)||limit<0||limit>1e9)fail('访问上限需为 0–10亿的整数');
- return {groupId:text(source.groupId,50),expires,limit,strategy,targets,devices,rules,fallback:source.fallback?safeUrl(source.fallback):'',templateId:text(source.templateId,50),channel:text(source.channel,80),conversionValue:Math.max(0,Math.min(1e8,Number(source.conversionValue)||0))};
+ return {guideTexts:cleanGuideTexts(source.guideTexts),groupId:text(source.groupId,50),expires,limit,strategy,targets,devices,rules,fallback:source.fallback?safeUrl(source.fallback):'',templateId:text(source.templateId,50),channel:text(source.channel,80),conversionValue:Math.max(0,Math.min(1e8,Number(source.conversionValue)||0))};
 }
 export function selectTarget(config:Row,base:string,req:Request,health:Row[]=[],random=Math.random(),now=Date.now()){
  const info=deviceInfo(req.headers.get('user-agent')||''),url=new URL(req.url),channel=text(url.searchParams.get('utm_source')||url.searchParams.get('channel')||config.channel,80),country=String((req as any).cf?.country||'').toUpperCase();

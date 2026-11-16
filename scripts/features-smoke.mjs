@@ -1,3 +1,4 @@
+import {DEFAULT_BROWSER_GUIDE} from '../src/resource-copy.ts';
 import assert from 'node:assert/strict';
 import {spawn,execFile} from 'node:child_process';
 import {promisify} from 'node:util';
@@ -27,8 +28,8 @@ try{
  const feature=(body,cookie=adminCookie)=>json('/api/features',body,cookie);
  assert.equal((await req('/api/features')).status,401);
  await feature({action:'group.save',name:'测试项目'});const group=(await json('/api/features?section=groups')).items[0];assert(group.id);
- const created=await json('/api/workspace',{action:'link.save',domainId,slug:'feature-one',title:'原有展示方式',target:'https://example.com/original',mode:'page',options:{groupId:group.id,channel:'test'}});
- let rows=(await json('/api/workspace')).items;assert.equal(rows[0].options.groupId,group.id);
+ const created=await json('/api/workspace',{action:'link.save',domainId,slug:'feature-one',title:'原有展示方式',target:'https://example.com/original',mode:'page',options:{groupId:group.id,channel:'test',guideTexts:[DEFAULT_BROWSER_GUIDE,'第二条：复制后再访问 <script>alert(1)</script>']}});
+ let rows=(await json('/api/workspace')).items;assert.equal(rows[0].options.groupId,group.id);assert.equal(rows[0].options.guideTexts.length,2);const customGuideHtml=await (await req('/feature-one')).text();assert(customGuideHtml.includes('第二条：复制后再访问 &lt;script&gt;'));assert(!customGuideHtml.includes('<script>alert(1)</script>'));
  assert.equal((await req('/api/features',{action:'group.delete',id:group.id},adminCookie)).status,400);
  const batch=await feature({action:'link.batch',domainId,mode:'direct',items:Array.from({length:100},(_,i)=>({slug:'batch-'+String(i).padStart(3,'0'),target:'https://example.org/'+i}))});assert.equal(batch.count,100);
  await feature({action:'link.bulk',operation:'disable',ids:batch.items.map(r=>r.id)});assert((await json('/api/workspace')).items.filter(r=>r.slug.startsWith('batch-')).every(r=>!r.enabled));
@@ -38,7 +39,7 @@ try{
  await feature({action:'link.bulk',operation:'delete',ids:[duplicate.id]});assert((await json('/api/features?section=recycle')).items.some(x=>x.id===duplicate.id));assert.equal((await req(new URL(duplicate.shortUrl).pathname)).status,404);
  await feature({action:'link.bulk',operation:'restore',ids:[duplicate.id]});assert.equal((await req(new URL(duplicate.shortUrl).pathname)).status,200);
  await feature({action:'link.options',id:created.id,options:{expires:Date.now()-1000}});assert.equal((await req('/feature-one')).status,410);
- await feature({action:'link.options',id:created.id,options:{limit:1}});const concurrent=await Promise.all(Array.from({length:5},()=>req('/feature-one')));assert.equal(concurrent.filter(r=>r.status===200).length,1);assert.equal(concurrent.filter(r=>r.status===410).length,4);
+ await feature({action:'link.options',id:created.id,options:{limit:Number((await json('/api/workspace')).items.find(x=>x.id===created.id).access_count)+1}});const concurrent=await Promise.all(Array.from({length:5},()=>req('/feature-one')));assert.equal(concurrent.filter(r=>r.status===200).length,1);assert.equal(concurrent.filter(r=>r.status===410).length,4);
  await feature({action:'link.options',id:created.id,options:{password:'visitor-secret',strategy:'device',devices:{android:'https://example.net/android'},channel:'campaign'}});
  const protectedPage=await req('/feature-one');const locked=await protectedPage.text();assert(locked.includes('请输入访问密码'));assert(!locked.includes('https://example.com/original'));
  const denied=await req('/api/public/unlock',{id:created.id,password:'wrong'});assert.equal(denied.status,403);
@@ -53,7 +54,7 @@ try{
  await feature({action:'document.save',id:doc.id,kind:'page',name:'安全内容页',body:{title:'新草稿',blocks:[{type:'form'}]}});assert((await (await req('/p/'+doc.id)).text()).includes('正常正文'),'saving a draft must not change publication');
  await feature({action:'document.publish',id:doc.id});await feature({action:'document.publish',id:doc.id,version:1});assert((await (await req('/p/'+doc.id)).text()).includes('正常正文'));
  const lead=await req('/api/public/lead',{id:doc.id,name:'测试访客',contact:'test@example.com',message:'测试留言'});assert.equal(lead.status,200);assert.equal((await json('/api/features?section=leads')).items.length,1);
- const template=await feature({action:'document.save',kind:'template',name:'自定义模板',body:{title:'模板标题',layout:'hero',blocks:[]}});await feature({action:'document.publish',id:template.id});await feature({action:'link.options',id:created.id,options:{templateId:template.id}});assert((await (await req('/feature-one')).text()).includes('模板标题'));
+ const template=await feature({action:'document.save',kind:'template',name:'自定义模板',body:{title:'模板标题',layout:'hero',blocks:[]}});await feature({action:'document.publish',id:template.id});await feature({action:'link.options',id:created.id,options:{templateId:template.id,guideTexts:[DEFAULT_BROWSER_GUIDE,'模板第二条提示']}});const templateHtml=await (await req('/feature-one')).text();assert(templateHtml.includes('模板标题'));assert(templateHtml.includes('模板第二条提示'));assert(!templateHtml.includes('<details><summary>在浏览器中打开'));assert.equal((templateHtml.match(/<style>/g)||[]).length,(templateHtml.match(/<\/style>/g)||[]).length);
  assert.equal((await req('/api/features',{action:'document.delete',id:template.id},adminCookie)).status,400);
  const live=await feature({action:'document.save',kind:'qr',name:'名片活码',body:{qr:{type:'contact',name:'测试联系人',phone:'12345'}}});await feature({action:'document.publish',id:live.id});const vcf=await req('/p/'+live.id+'?download=vcf');assert(vcf.headers.get('content-type').includes('text/vcard'));assert((await vcf.text()).includes('BEGIN:VCARD'));
  const groupQr=await feature({action:'document.save',kind:'groupqr',name:'分配测试',body:{rotation:'sequence',targets:[{id:'first',url:'https://example.org/first.png',dailyLimit:1,totalLimit:0,weight:1},{id:'second',url:'https://example.org/second.png',dailyLimit:0,totalLimit:0,weight:1}]}});await feature({action:'document.publish',id:groupQr.id});const first=await req('/p/'+groupQr.id);const firstHtml=await first.text();assert(firstHtml.includes('first.png'));const firstVisitor=cookies(first);assert((await (await req('/p/'+groupQr.id,undefined,firstVisitor)).text()).includes('first.png'));assert((await (await req('/p/'+groupQr.id,undefined,'',{headers:{'User-Agent':'Another actual visitor'}})).text()).includes('second.png'));
