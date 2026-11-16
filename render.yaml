@@ -1,0 +1,21 @@
+# This production configuration requires a paid web instance and persistent disk.
+# Review the current Render price and approve the cost before deploying it.
+services:
+  - type: web
+    name: link-workspace
+    runtime: node
+    plan: 0.5c-512mb
+    buildCommand: npm ci --include=dev && npm run build
+    startCommand: npm start
+    healthCheckPath: /healthz
+    disk:
+      name: workspace-data
+      mountPath: /var/data
+      sizeGB: 1
+    envVars:
+      - key: NODE_VERSION
+        value: 24.22.1
+      - key: DATA_DIR
+        value: /var/data
+      - key: SETUP_TOKEN
+        generateValue: true

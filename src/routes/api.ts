@@ -1,0 +1,49 @@
+import { all,one,run,user,requireAdmin,mutationGuard,targetUrl,domainOrigin,fail,scope,slugValue,randomSlug,day,db } from '../core.ts';
+export const dynamic='force-dynamic';
+function response(data:unknown,status=200){return Response.json(data,{status,headers:{'Cache-Control':'no-store'}});}
+function error(e:any){return response({error:e.message?.includes('UNIQUE constraint')?'该域名或短码已存在，请换一个':e.status?e.message:'服务暂时不可用，请稍后重试'},e.status||500);}
+export async function GET(req:Request){try{
+ const u=await user(req),s=scope(u),p=new URL(req.url).searchParams;
+ const domainId=p.get('domain')||'',search=(p.get('q')||'').slice(0,200),kind=p.get('view')||'links';
+ const domains=await all(`SELECT d.*, (SELECT count(*) FROM links l WHERE l.domain_id=d.id AND l.deleted_at IS NULL AND ${s.sql}) total, (SELECT count(*) FROM visits v JOIN links l ON l.id=v.link_id WHERE l.domain_id=d.id AND ${s.sql}) visits FROM domains d ORDER BY d.created_at`,...s.args,...s.args);
+ const filters=`${s.sql} AND (?='' OR l.domain_id=?)`,args=[...s.args,domainId,domainId];
+ const stats=await one(`SELECT count(*) total,coalesce(sum(CASE WHEN l.enabled=1 AND d.status!='disabled' AND u.enabled=1 THEN 1 ELSE 0 END),0) active FROM links l JOIN domains d ON d.id=l.domain_id JOIN users u ON u.id=l.owner_id WHERE l.deleted_at IS NULL AND ${filters}`,...args);
+ stats.visits=(await one(`SELECT count(*) n FROM visits v JOIN links l ON l.id=v.link_id WHERE ${filters}`,...args)).n;
+ stats.users=u.admin?(await one('SELECT count(*) n FROM users WHERE id!=?',u.id)).n:undefined;
+ let result:any={user:{id:u.id,name:u.name,email:u.email,admin:u.admin},domains,stats};
+ if(kind==='links'){
+ const rows=await all(`SELECT l.*,d.origin,d.host,d.status domain_status,u.name owner_name,u.enabled owner_enabled,(SELECT count(*) FROM visits WHERE link_id=l.id) visits FROM links l JOIN domains d ON d.id=l.domain_id JOIN users u ON u.id=l.owner_id WHERE l.deleted_at IS NULL AND ${filters} AND (?='' OR instr(lower(l.title||' '||l.target||' '||l.slug),lower(?))>0) ORDER BY l.created_at DESC`,...args,search,search);result.items=rows;
+ }
+ if(kind==='analytics'){
+ const from=p.get('from')||day(),to=p.get('to')||day();
+ const valid=(v:string)=>/^\d{4}-\d{2}-\d{2}$/.test(v)&&!isNaN(Date.parse(v))&&new Date(v).toISOString().slice(0,10)===v;
+ if(!valid(from)||!valid(to)||from>to||to>day()||(Date.parse(to)-Date.parse(from))/86400000>365)fail('请选择不超过 366 天的有效日期范围');
+ const daily=await all(`SELECT v.day,count(*) visits FROM visits v JOIN links l ON l.id=v.link_id WHERE ${filters} AND v.day BETWEEN ? AND ? GROUP BY v.day ORDER BY v.day`,...args,from,to);
+ const dates=[];for(let t=Date.parse(from);t<=Date.parse(to);t+=86400000)dates.push(new Date(t).toISOString().slice(0,10));
+ result.daily=dates.map(date=>({date,visits:daily.find(x=>x.day===date)?.visits||0}));
+ result.items=await all(`SELECT l.id,l.title,l.slug,d.origin,d.host,l.deleted_at,count(v.id) visits FROM links l JOIN domains d ON d.id=l.domain_id LEFT JOIN visits v ON v.link_id=l.id AND v.day BETWEEN ? AND ? WHERE ${filters} AND (?='' OR instr(lower(l.title||' '||l.slug),lower(?))>0) GROUP BY l.id ORDER BY visits DESC,l.created_at DESC`,from,to,...args,search,search);
+ if(p.get('link')){const link=await one(`SELECT l.id FROM links l WHERE l.id=? AND ${filters}`,p.get('link'),...args);if(!link)fail('链接不存在',404);const list=await all('SELECT day,count(*) visits FROM visits WHERE link_id=? AND day BETWEEN ? AND ? GROUP BY day',link.id,from,to);result.detail=dates.map(date=>({date,visits:list.find(x=>x.day===date)?.visits||0}));}
+ }
+ if(kind==='users'){requireAdmin(u);result.items=await all('SELECT id,name,email,enabled,created_at,(SELECT count(*) FROM links WHERE owner_id=users.id AND deleted_at IS NULL) link_count FROM users ORDER BY created_at');}
+ if(kind==='settings'){requireAdmin(u);result.settings=Object.fromEntries((await all("SELECT key,value FROM settings WHERE key IN ('registration','fallback')")).map(x=>[x.key,x.value]));}
+ return response(result);
+ }catch(e){return error(e);}}
+export async function POST(req:Request){try{
+ mutationGuard(req);const u=await user(req);if(Number(req.headers.get('content-length')||0)>16384)fail('请求内容过大');const b=await req.json() as any;
+ if(b.action==='link.save'){
+ const target=targetUrl(b.target),title=String(b.title||'').trim().slice(0,160);if(!['direct','page'].includes(b.mode))fail('请选择跳转方式');
+ if(b.id){const item=await one('SELECT * FROM links WHERE id=? AND deleted_at IS NULL',b.id);if(!item||(!u.admin&&item.owner_id!==u.id))fail('链接不存在',404);await run('UPDATE links SET title=?,target=?,mode=? WHERE id=?',title,target,b.mode,item.id);}
+ else {const d=await one("SELECT * FROM domains WHERE id=? AND status='active'",b.domainId);if(!d)fail('请选择正常启用的域名');const slug=b.slug?slugValue(b.slug):randomSlug();const id=crypto.randomUUID();await run('INSERT INTO links (id,domain_id,owner_id,slug,title,target,mode,enabled,created_at) VALUES (?,?,?,?,?,?,?,1,?)',id,d.id,u.id,slug,title,target,b.mode,Date.now());return response({id,shortUrl:`${d.origin}/${slug}`});}
+ }else if(['link.toggle','link.delete'].includes(b.action)){
+ const item=await one('SELECT * FROM links WHERE id=? AND deleted_at IS NULL',b.id);if(!item||(!u.admin&&item.owner_id!==u.id))fail('链接不存在',404);
+ if(b.action==='link.delete')await run('UPDATE links SET deleted_at=?,enabled=0 WHERE id=?',Date.now(),item.id);else await run('UPDATE links SET enabled=? WHERE id=?',item.enabled?0:1,item.id);
+ }else if(b.action==='domain.save'){
+ requireAdmin(u);const name=String(b.name||'').trim().slice(0,80),status=b.status||'active';if(!['active','paused','disabled'].includes(status))fail('域名状态无效');if(b.isDefault&&status!=='active')fail('默认域名必须处于正常状态');
+ if(b.id){const old=await one('SELECT * FROM domains WHERE id=?',b.id);if(!old)fail('域名不存在',404);if(old.is_default&&status!=='active')fail('请先将其他正常域名设为默认');const stmts=[];if(b.isDefault)stmts.push(db().prepare('UPDATE domains SET is_default=0'));stmts.push(db().prepare('UPDATE domains SET name=?,status=?,is_default=? WHERE id=?').bind(name,status,b.isDefault||old.is_default?1:0,b.id));await db().batch(stmts);}
+ else{const origin=domainOrigin(b.origin),host=new URL(origin).host,id=crypto.randomUUID(),stmts=[];if(b.isDefault)stmts.push(db().prepare('UPDATE domains SET is_default=0'));stmts.push(db().prepare("INSERT INTO domains (id,origin,host,name,status,is_default,created_at) VALUES (?,?,?,?,'active',?,?)").bind(id,origin,host,name,b.isDefault?1:0,Date.now()));await db().batch(stmts);}
+ }else if(b.action==='user.toggle'){requireAdmin(u);if(b.id===u.id)fail('不能停用管理员本人');await run('UPDATE users SET enabled=CASE WHEN enabled=1 THEN 0 ELSE 1 END WHERE id=?',b.id);
+ }else if(b.action==='settings.save'){requireAdmin(u);const fallback=b.fallback?targetUrl(b.fallback):'';await db().batch([db().prepare("INSERT INTO settings (key,value) VALUES ('registration',?) ON CONFLICT(key) DO UPDATE SET value=excluded.value").bind(b.registration?'1':'0'),db().prepare("INSERT INTO settings (key,value) VALUES ('fallback',?) ON CONFLICT(key) DO UPDATE SET value=excluded.value").bind(fallback)]);
+ }else if(b.action==='account.save'){const name=String(b.name||'').trim();if(name.length<1||name.length>80)fail('昵称需为 1–80 个字符');await run('UPDATE users SET name=? WHERE id=?',name,u.id);
+ }else fail('未知操作');return response({ok:true});
+ }catch(e){return error(e);}}
+
