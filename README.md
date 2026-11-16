@@ -22,7 +22,9 @@ Cloudflare Workers 的默认 workers.dev 地址未通过接收者手机访问测
 
 ## X 外部浏览器兼容性测试（尚未验收）
 
-测试页： https://link-share-9188.pages.dev/assets/x-browser-test.html 。从真实手机 X 客户端进入后，分别测试安卓默认浏览器 Intent、已安装 Chrome 的显式 Intent，以及 iPhone Safari scheme / 已安装 Chrome 的 scheme。到达页为 `/assets/browser-arrival.html`，加载该页本身不能证明切出了 X，必须核实独立浏览器应用实际启动。
+当前实测未通过：所有者确认安卓默认浏览器及指定 Chrome 的两个 Intent 按钮均提示“没有应用能执行此操作”，未能切出 X。普通 HTTPS `target=_blank` 新窗口对照也已实测，到达页加载成功但仍留在 X 内，不能算外部浏览器唤起。用户只接受系统默认浏览器，不以指定 Chrome 为目标。iPhone 暂无设备可测试，尚无成功结论。目前没有已验证可交付的 X 强制默认浏览器方案，不满足安卓与 iPhone 均必须切出的要求。
+
+测试页： https://link-share-9188.pages.dev/assets/x-browser-test.html 。包含普通 HTTPS 新窗口对照、安卓默认浏览器 Intent 和 iPhone Safari 候选。到达页为 `/assets/browser-arrival.html`，加载该页本身不能证明切出了 X，必须核实独立浏览器应用实际启动。指定 Chrome 的选项已从当前测试页移除。
 
 目前只发布隔离测试页，未添加“X 强制跳转”功能或改动业务短链。安卓机制参考 [Chrome Intent 文档](https://developer.chrome.com/docs/android/intents)；iOS Chrome scheme 参考 [Chromium 官方说明](https://chromium.googlesource.com/chromium/src.git/+/master/docs/ios/opening_links.md)。Safari `x-safari-https` 为实验候选，不是已经确认的 X 官方接口，不承诺系统默认浏览器或所有 iOS 版本可用。点击按钮遵循客户端的正常应用打开流程，不使用自动循环唤起、签名复用或安全告警绕过。
 

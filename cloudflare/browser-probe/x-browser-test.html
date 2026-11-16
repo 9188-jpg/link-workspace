@@ -2,10 +2,13 @@
 <html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="robots" content="noindex,nofollow"><meta name="referrer" content="no-referrer"><title>X 外部浏览器验收</title>
 <style>*{box-sizing:border-box}body{margin:0;padding:24px;min-height:100svh;background:#f5f7fb;color:#26324a;font-family:system-ui,"Microsoft YaHei",sans-serif;display:grid;place-items:center}main{background:#fff;border:1px solid #e6eaf2;border-radius:16px;width:100%;max-width:480px;padding:30px}small{color:#5269d8;letter-spacing:1px}h1{font-size:24px;margin:14px 0}p{font-size:14px;color:#69758b;line-height:1.8}h2{font-size:16px;margin:28px 0 12px}a{display:block;padding:14px 16px;margin:10px 0;border-radius:9px;background:#5269d8;color:#fff;text-align:center;text-decoration:none;font-size:14px}.secondary{color:#5269d8;background:#f0f3ff;border:1px solid #dce3ff}.note{background:#fff8e7;padding:14px;border-radius:8px;color:#785c24;font-size:13px}footer{font-size:12px;color:#8994a7;margin-top:24px;line-height:1.8}</style></head>
 <body><main><small>LINK WORKSPACE · 兼容性验收</small><h1>从 X 打开手机浏览器</h1><p>请从手机 X 客户端进入本页，再点击与你的设备对应的按钮。成功后会到达“浏览器验收页”。</p><p class="note">请确认手机已经切换到独立的浏览器应用。仅在 X 窗口内显示目标页面，不算通过。</p>
-<h2>安卓手机</h2>
+<h2>系统默认浏览器 · 新窗口测试</h2>
+<a href="https://link-share-9188.pages.dev/assets/browser-arrival.html?via=x-new-window" target="_blank" rel="noopener noreferrer external">测试新窗口打开</a>
+<p>此项不指定 Chrome。请检查是否离开了 X 并进入系统默认浏览器；仍在 X 窗口内显示页面则不算通过。</p>
+<h2>安卓协议测试 · 当前未通过</h2>
 <a href="intent://link-share-9188.pages.dev/assets/browser-arrival.html#Intent;scheme=https;action=android.intent.action.VIEW;category=android.intent.category.BROWSABLE;S.browser_fallback_url=https%3A%2F%2Flink-share-9188.pages.dev%2Fassets%2Fbrowser-arrival.html;end">尝试打开默认浏览器</a>
-<a class="secondary" href="intent://link-share-9188.pages.dev/assets/browser-arrival.html#Intent;scheme=https;package=com.android.chrome;action=android.intent.action.VIEW;category=android.intent.category.BROWSABLE;S.browser_fallback_url=https%3A%2F%2Flink-share-9188.pages.dev%2Fassets%2Fbrowser-arrival.html;end">尝试打开 Chrome（需已安装）</a>
+<p>已收到“没有应用能执行此操作”的反馈，此项尚不能用于正式分享。</p>
 <h2>iPhone</h2>
 <a href="x-safari-https://link-share-9188.pages.dev/assets/browser-arrival.html">尝试打开 Safari</a>
-<a class="secondary" href="googlechromes://link-share-9188.pages.dev/assets/browser-arrival.html">尝试打开 Chrome（需已安装）</a>
+<p>Safari 候选尚未在真实 iPhone 的 X 客户端验收，不能承诺兼容。</p>
 <footer>这是兼容性测试，尚未确认你的 X 版本是否支持。若没有切换应用，请如实反馈按钮无反应、报错或仍留在 X 内。</footer></main></body></html>
