@@ -1,5 +1,7 @@
 import {database,getEnv} from './database.ts';
-const ttl=7*86400000,iterations=600000;
+// Cloudflare production rejects PBKDF2 above 100,000 iterations, unlike local workerd.
+// A separate secret peppers the derived hash, so a database dump alone cannot verify guesses.
+const ttl=7*86400000,iterations=100000,passwordFormat='pbkdf2-hmac';
 const encoder=new TextEncoder();
 const hex=(value:ArrayBuffer|Uint8Array)=>Array.from(new Uint8Array(value instanceof Uint8Array?value.buffer.slice(value.byteOffset,value.byteOffset+value.byteLength):value),v=>v.toString(16).padStart(2,'0')).join('');
 const random=(n:number)=>hex(crypto.getRandomValues(new Uint8Array(n)));
@@ -8,9 +10,9 @@ function equal(a:string,b:string){let n=a.length^b.length;for(let i=0;i<Math.max
 function fail(message:string,status=400):never{throw Object.assign(new Error(message),{status});}
 async function one(sql:string,...args:any[]):Promise<any>{return database.prepare(sql).bind(...args).first();}
 async function run(sql:string,...args:any[]){return database.prepare(sql).bind(...args).run();}
-async function derive(password:string,salt:string){const key=await crypto.subtle.importKey('raw',encoder.encode(password),'PBKDF2',false,['deriveBits']);return hex(await crypto.subtle.deriveBits({name:'PBKDF2',hash:'SHA-256',salt:encoder.encode(salt),iterations},key,256));}
-async function encodedPassword(password:string){const salt=random(16);return `pbkdf2$${iterations}$${salt}$${await derive(password,salt)}`;}
-async function verify(password:string,stored:string){const parts=stored.split('$');if(parts.length!==4||parts[0]!=='pbkdf2'||Number(parts[1])!==iterations)return false;return equal(await derive(password,parts[2]),parts[3]);}
+async function derive(password:string,salt:string){const pepper=getEnv().AUTH_PEPPER||'';if(pepper.length<32)throw new Error('AUTH_PEPPER must be configured before password authentication');const key=await crypto.subtle.importKey('raw',encoder.encode(password),'PBKDF2',false,['deriveBits']);const bits=await crypto.subtle.deriveBits({name:'PBKDF2',hash:'SHA-256',salt:encoder.encode(salt),iterations},key,256);const hmac=await crypto.subtle.importKey('raw',encoder.encode(pepper),{name:'HMAC',hash:'SHA-256'},false,['sign']);return hex(await crypto.subtle.sign('HMAC',hmac,bits));}
+async function encodedPassword(password:string){const salt=random(16);return `${passwordFormat}$${iterations}$${salt}$${await derive(password,salt)}`;}
+async function verify(password:string,stored:string){const parts=stored.split('$');if(parts.length!==4||parts[0]!==passwordFormat||Number(parts[1])!==iterations)return false;return equal(await derive(password,parts[2]),parts[3]);}
 function credentials(body:any){const username=String(body.username||'').trim().toLowerCase(),password=String(body.password||'');if(!/^[a-z0-9_]{3,32}$/.test(username)||password.length<12||password.length>128)fail('账号需为 3–32 位字母、数字或下划线，密码需为 12–128 位');return {username,password};}
 export async function initialized(){return !!await one("SELECT value FROM settings WHERE key='owner'");}
 function guard(req:Request){if(req.headers.get('X-Requested-With')!=='link-workspace')fail('请求校验失败',403);const origin=req.headers.get('Origin');if(origin&&origin!==new URL(req.url).origin)fail('不允许跨站请求',403);}
@@ -48,7 +50,7 @@ export async function auth(req:Request,path:string){
  if(path==='/auth/login'){
   const username=String(body.username||'').trim().toLowerCase(),password=String(body.password||'');if(username.length>32||password.length>128)fail('账号或密码不正确',401);await rate('account:'+username);
   const account=await one('SELECT a.*,u.enabled FROM accounts a JOIN users u ON a.user_id=u.id WHERE username=?',username);
-  const stored=account?.password||`pbkdf2$${iterations}$00000000000000000000000000000000$${'0'.repeat(64)}`;
+  const stored=account?.password||`${passwordFormat}$${iterations}$00000000000000000000000000000000$${'0'.repeat(64)}`;
   if(!await verify(password,stored)||!account)fail('账号或密码不正确',401);if(!account.enabled)fail('账号已停用',403);return issue(account.user_id,req);
  }
  fail('页面不存在',404);
