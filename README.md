@@ -24,6 +24,10 @@ Cloudflare Workers 的默认 workers.dev 地址未通过接收者手机访问测
 
 ## X 外部浏览器兼容性测试（尚未验收）
 
+GitHub 实现对照测试：`/assets/github-browser-test.html`。安卓 `?run=android-auto` 在页面加载时单次发起 `astro-inapp-escape` 同结构的无 package 精简 Intent；页面按钮可对照用户点击场景。iPhone 测试仅是 `inapp-debugger` 记载的 Safari scheme 候选，不能宣称 X 已支持。所有方法统一指向新建的 `/github-browser-1116` 中转验收短链，显示中转页后用户再点百度，避免与直接唤起夸克混淆。电脑端不会发起手机协议。
+
+`scripts/github-browser-probe-test.mjs` 在隔离的模拟对象中核对上游控制流及本页单次请求：`marco1cc/inapp-escape` 对 iPhone/X 返回 fallback，安卓指定 Chrome 且 success 回调只表示发起；`vdaluz/astro-inapp-escape` 安卓不指定 package、iOS 为 banner。上游只读源码下载和 SHA256 测试结果保存在被 Git 忽略的 `outputs`，不向线上页面引入远程第三方脚本。此类模拟断言不能证明手机实际切换了应用，最终必须在真实 X 客户端验收。
+
 当前实测未通过：所有者确认安卓默认浏览器及指定 Chrome 的两个 Intent 按钮均提示“没有应用能执行此操作”，未能切出 X。普通 HTTPS `target=_blank` 新窗口对照也已实测，到达页加载成功但仍留在 X 内，不能算外部浏览器唤起。用户只接受系统默认浏览器，不以指定 Chrome 为目标。iPhone 暂无设备可测试，尚无成功结论。目前没有已验证可交付的 X 强制默认浏览器方案，不满足安卓与 iPhone 均必须切出的要求。
 
 测试页： https://link-share-9188.pages.dev/assets/x-browser-test.html 。包含普通 HTTPS 新窗口对照、安卓默认浏览器 Intent 和 iPhone Safari 候选。到达页为 `/assets/browser-arrival.html`，加载该页本身不能证明切出了 X，必须核实独立浏览器应用实际启动。指定 Chrome 的选项已从当前测试页移除。
