@@ -18,6 +18,7 @@ if(version===0){
   sqlite.exec('COMMIT');
  }catch(e){sqlite.exec('ROLLBACK');throw e;}
 }
+if(version<2){sqlite.exec('BEGIN IMMEDIATE');try{sqlite.exec(readFileSync(new URL('../cloudflare/migrations/0002_free_features.sql',import.meta.url),'utf8'));sqlite.exec('PRAGMA user_version=2; COMMIT;');}catch(e){sqlite.exec('ROLLBACK');throw e;}}
 function statement(sql:string,args:any[]=[]){return {
  sql,args,
  bind(...values:any[]){return statement(sql,values);},

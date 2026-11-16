@@ -57,7 +57,7 @@ function runtime({ua=android,clipboard=true,copySuccess=true}={}){
 test('loading the page performs no clipboard write, timer, or automatic navigation',()=>{
  const r=runtime();assert.equal(r.writes.length,0);assert.equal(r.syncCopies(),0);assert.equal(r.timers.length,0);
  assert.equal(typeof r.elements['open-resource'].events.click,'function');
- const normal=runtime({ua:safari});assert.equal(normal.elements['open-resource'].events.click,undefined);
+ const normal=runtime({ua:safari});normal.elements['open-resource'].events.click();assert.equal(normal.timers.length,0);assert.equal(normal.syncCopies(),0);
 });
 
 test('both copy buttons copy the target, not the short link or app handoff',async()=>{

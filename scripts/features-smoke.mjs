@@ -1,0 +1,75 @@
+import assert from 'node:assert/strict';
+import {spawn,execFile} from 'node:child_process';
+import {promisify} from 'node:util';
+import {mkdtemp,mkdir} from 'node:fs/promises';
+import {resolve} from 'node:path';
+import {randomBytes} from 'node:crypto';
+import {browserShareUrl} from '../src/share-url.ts';
+const root=resolve(import.meta.dirname,'..');
+const pages=process.argv.includes('--pages');
+const cloudflare=pages||process.argv.includes('--cloudflare');
+const execute=promisify(execFile);
+await mkdir(resolve(root,'outputs'),{recursive:true});
+const directory=await mkdtemp(resolve(root,'outputs','test-db-'));
+const setupToken=cloudflare?'LOCAL_TEST_ONLY_INITIALIZATION_TOKEN_123456':randomBytes(32).toString('hex'),password=randomBytes(24).toString('base64url');
+const authPepper=randomBytes(32).toString('hex');
+const port=String(23000+Math.floor(Math.random()*10000)),origin='http://127.0.0.1:'+port;
+let child,adminCookie='',memberCookie='';
+async function start(){const args=pages?[resolve(root,'node_modules/wrangler/bin/wrangler.js'),'pages','dev','--cwd','cloudflare/pages','--ip','127.0.0.1','--port',port,'--persist-to',directory,'--binding','SETUP_TOKEN='+setupToken,'--binding','AUTH_PEPPER='+authPepper]:cloudflare?['node_modules/wrangler/bin/wrangler.js','dev','--local','--ip','127.0.0.1','--port',port,'--persist-to',directory,'--var','SETUP_TOKEN:'+setupToken,'--var','AUTH_PEPPER:'+authPepper]:['src/server.ts'];child=spawn(process.execPath,args,{cwd:root,env:{...process.env,PORT:port,HOST:'127.0.0.1',DATA_DIR:directory,SETUP_TOKEN:setupToken,PUBLIC_ORIGIN:origin,RENDER:'',CLOUDFLARE_CF_FETCH_ENABLED:'false',WRANGLER_SEND_METRICS:'false'},stdio:['ignore','pipe','pipe']});let logs='';child.stderr.on('data',b=>{logs+=b;});await new Promise((resolve,reject)=>{const timer=setTimeout(()=>reject(new Error('Server failed to start: '+logs)),45000);child.stdout.on('data',b=>{logs+=b;if(String(b).includes(cloudflare?'Ready on':'listening')){clearTimeout(timer);resolve();}});child.once('exit',code=>{clearTimeout(timer);reject(new Error('Server exited: '+code+' '+logs));});});}
+async function stop(){if(!child||child.exitCode!==null)return;const exited=new Promise(resolve=>child.once('exit',resolve));if(cloudflare&&process.platform==='win32')await execute('taskkill',['/PID',String(child.pid),'/T','/F']).catch(()=>{});else child.kill();await exited;}
+async function req(path,body,cookie='',extra={}){return fetch(origin+path,{redirect:'manual',...extra,headers:{...(cookie?{Cookie:cookie}:{}),...(body?{'Content-Type':'application/json','X-Requested-With':'link-workspace',Origin:origin}:{}),...extra.headers},...(body?{method:'POST',body:JSON.stringify(body)}:{})});}
+async function json(path,body,cookie=adminCookie){const r=await req(path,body,cookie);const data=await r.json();assert.equal(r.status,200,JSON.stringify(data));return data;}
+const cookies=r=>r.headers.getSetCookie().map(v=>v.split(';')[0]).join('; ');
+try{
+ if(cloudflare)await execute(process.execPath,['node_modules/wrangler/bin/wrangler.js','d1','migrations','apply','link-workspace-db','--local','--persist-to',directory],{cwd:root,env:{...process.env,WRANGLER_SEND_METRICS:'false'},timeout:45000});
+ await start();const setup=await req('/auth/setup',{token:setupToken,username:'admin',password});assert.equal(setup.status,200);adminCookie=cookies(setup);
+ const workspace=await json('/api/workspace'),domainId=workspace.domains[0].id;
+ const feature=(body,cookie=adminCookie)=>json('/api/features',body,cookie);
+ assert.equal((await req('/api/features')).status,401);
+ await feature({action:'group.save',name:'测试项目'});const group=(await json('/api/features?section=groups')).items[0];assert(group.id);
+ const created=await json('/api/workspace',{action:'link.save',domainId,slug:'feature-one',title:'原有展示方式',target:'https://example.com/original',mode:'page',options:{groupId:group.id,channel:'test'}});
+ let rows=(await json('/api/workspace')).items;assert.equal(rows[0].options.groupId,group.id);
+ assert.equal((await req('/api/features',{action:'group.delete',id:group.id},adminCookie)).status,400);
+ const batch=await feature({action:'link.batch',domainId,mode:'direct',items:Array.from({length:100},(_,i)=>({slug:'batch-'+String(i).padStart(3,'0'),target:'https://example.org/'+i}))});assert.equal(batch.count,100);
+ await feature({action:'link.bulk',operation:'disable',ids:batch.items.map(r=>r.id)});assert((await json('/api/workspace')).items.filter(r=>r.slug.startsWith('batch-')).every(r=>!r.enabled));
+ await feature({action:'link.bulk',operation:'delete',ids:[batch.items[0].id]});await feature({action:'link.bulk',operation:'restore',ids:[batch.items[0].id]});assert.equal((await json('/api/workspace')).items.find(r=>r.id===batch.items[0].id).enabled,0,'recycle must preserve the prior paused state');
+ assert.equal((await req('/api/workspace',{action:'link.save',domainId,slug:'callback',target:'https://example.org/',mode:'page'},adminCookie)).status,400);
+ const duplicate=await feature({action:'link.duplicate',id:created.id});assert(duplicate.id!==created.id);
+ await feature({action:'link.bulk',operation:'delete',ids:[duplicate.id]});assert((await json('/api/features?section=recycle')).items.some(x=>x.id===duplicate.id));assert.equal((await req(new URL(duplicate.shortUrl).pathname)).status,404);
+ await feature({action:'link.bulk',operation:'restore',ids:[duplicate.id]});assert.equal((await req(new URL(duplicate.shortUrl).pathname)).status,200);
+ await feature({action:'link.options',id:created.id,options:{expires:Date.now()-1000}});assert.equal((await req('/feature-one')).status,410);
+ await feature({action:'link.options',id:created.id,options:{limit:1}});const concurrent=await Promise.all(Array.from({length:5},()=>req('/feature-one')));assert.equal(concurrent.filter(r=>r.status===200).length,1);assert.equal(concurrent.filter(r=>r.status===410).length,4);
+ await feature({action:'link.options',id:created.id,options:{password:'visitor-secret',strategy:'device',devices:{android:'https://example.net/android'},channel:'campaign'}});
+ const protectedPage=await req('/feature-one');const locked=await protectedPage.text();assert(locked.includes('请输入访问密码'));assert(!locked.includes('https://example.com/original'));
+ const denied=await req('/api/public/unlock',{id:created.id,password:'wrong'});assert.equal(denied.status,403);
+ const unlock=await req('/api/public/unlock',{id:created.id,password:'visitor-secret'});assert.equal(unlock.status,200);const accessCookie=cookies(unlock);
+ const opened=await req('/feature-one?utm_source=private-campaign',undefined,accessCookie,{headers:{'User-Agent':'Mozilla/5.0 Android TwitterAndroid'}});const html=await opened.text();assert.equal(opened.status,200);assert(html.includes('https://example.net/android'));assert(!html.includes('android?utm_source'));
+ const token=html.match(/const eventToken="([^"]+)"/)[1];assert.equal((await req('/api/public/event',{token:'forged',kind:'copy'})).status,403);assert.equal((await req('/api/public/event',{token,kind:'copy'})).status,200);assert.equal((await req('/api/public/event',{token,kind:'copy'})).status,200);
+ const stats=await json('/api/features?section=overview');assert.equal(stats.totals.find(x=>x.kind==='copy').total,1);
+ await feature({action:'link.options',id:created.id,options:{password:'replacement-secret'}});assert((await (await req('/feature-one',undefined,accessCookie)).text()).includes('请输入访问密码'));
+ await feature({action:'link.options',id:created.id,options:{clearPassword:true}});
+ const doc=await feature({action:'document.save',kind:'page',name:'安全内容页',body:{title:'<script>escaped</script>',blocks:[{type:'text',title:'文字',text:'正常正文'},{type:'form',title:'留言'}]}});assert.equal((await req('/p/'+doc.id)).status,404);
+ await feature({action:'document.publish',id:doc.id});let publicDoc=await req('/p/'+doc.id);let docHtml=await publicDoc.text();assert(docHtml.includes('&lt;script&gt;escaped&lt;/script&gt;'));assert(!docHtml.includes('<script>escaped</script>'));
+ await feature({action:'document.save',id:doc.id,kind:'page',name:'安全内容页',body:{title:'新草稿',blocks:[{type:'form'}]}});assert((await (await req('/p/'+doc.id)).text()).includes('正常正文'),'saving a draft must not change publication');
+ await feature({action:'document.publish',id:doc.id});await feature({action:'document.publish',id:doc.id,version:1});assert((await (await req('/p/'+doc.id)).text()).includes('正常正文'));
+ const lead=await req('/api/public/lead',{id:doc.id,name:'测试访客',contact:'test@example.com',message:'测试留言'});assert.equal(lead.status,200);assert.equal((await json('/api/features?section=leads')).items.length,1);
+ const template=await feature({action:'document.save',kind:'template',name:'自定义模板',body:{title:'模板标题',layout:'hero',blocks:[]}});await feature({action:'document.publish',id:template.id});await feature({action:'link.options',id:created.id,options:{templateId:template.id}});assert((await (await req('/feature-one')).text()).includes('模板标题'));
+ assert.equal((await req('/api/features',{action:'document.delete',id:template.id},adminCookie)).status,400);
+ const live=await feature({action:'document.save',kind:'qr',name:'名片活码',body:{qr:{type:'contact',name:'测试联系人',phone:'12345'}}});await feature({action:'document.publish',id:live.id});const vcf=await req('/p/'+live.id+'?download=vcf');assert(vcf.headers.get('content-type').includes('text/vcard'));assert((await vcf.text()).includes('BEGIN:VCARD'));
+ const groupQr=await feature({action:'document.save',kind:'groupqr',name:'分配测试',body:{rotation:'sequence',targets:[{id:'first',url:'https://example.org/first.png',dailyLimit:1,totalLimit:0,weight:1},{id:'second',url:'https://example.org/second.png',dailyLimit:0,totalLimit:0,weight:1}]}});await feature({action:'document.publish',id:groupQr.id});const first=await req('/p/'+groupQr.id);const firstHtml=await first.text();assert(firstHtml.includes('first.png'));const firstVisitor=cookies(first);assert((await (await req('/p/'+groupQr.id,undefined,firstVisitor)).text()).includes('first.png'));assert((await (await req('/p/'+groupQr.id)).text()).includes('second.png'));
+ const png='iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+aPs8AAAAASUVORK5CYII=';const asset=await feature({action:'asset.upload',name:'pixel.png',mime:'image/png',body:png});assert.equal((await req(new URL(asset.url).pathname)).status,200);assert.equal((await req('/api/features',{action:'asset.upload',name:'bad.png',mime:'image/png',body:btoa('<script>bad</script>')},adminCookie)).status,400);
+ const key=await feature({action:'key.create',name:'test-client',quota:100,ips:[]});assert(key.secret);assert(!(JSON.stringify(await json('/api/features?section=keys'))).includes(key.secret));
+ const {createHash,createHmac}=await import('node:crypto');
+ async function signed(path,body,nonce=randomBytes(12).toString('hex')){const timestamp=String(Math.floor(Date.now()/1000)),raw=body?JSON.stringify(body):'',method=body?'POST':'GET',canonical=[method,path,timestamp,nonce,createHash('sha256').update(raw).digest('hex')].join('\n'),signature=createHmac('sha256',key.secret).update(canonical).digest('hex');return fetch(origin+path,{method,headers:{'Content-Type':'application/json','X-App-Id':key.id,'X-App-Timestamp':timestamp,'X-App-Nonce':nonce,'X-App-Signature':signature},...(body?{body:raw}:{})});}
+ const nonce=randomBytes(12).toString('hex');assert.equal((await signed('/api/openapi/shortlink/list?page=1',null,nonce)).status,200);assert.equal((await signed('/api/openapi/shortlink/list?page=1',null,nonce)).status,409);assert.equal((await signed('/api/openapi/shortlink/generate',{target:'https://example.org/api',mode:'direct'})).status,200);
+ const partner=await feature({action:'partner.create',id:created.id});assert.equal((await req(new URL(partner.url).pathname)).status,200);assert.equal((await req(new URL(partner.url).pathname,{target:'https://example.net/partner'})).status,200);await feature({action:'partner.revoke',id:created.id});assert.equal((await req(new URL(partner.url).pathname)).status,404);
+ await json('/api/workspace',{action:'settings.save',registration:true,fallback:''});const member=await req('/auth/register',{username:'member',password});assert.equal(member.status,200);memberCookie=cookies(member);
+ await json('/api/workspace',{action:'domain.save',origin:'https://private.example',name:'Private'},memberCookie);const privateDomain=(await json('/api/workspace',undefined,memberCookie)).domains.find(d=>d.host==='private.example');assert(privateDomain.owner_id);assert.equal(privateDomain.status,'paused','unbound new domains must not enter the active domain pool');
+ const other=await req('/auth/register',{username:'other_member',password});const otherCookie=cookies(other);assert(!(await json('/api/workspace',undefined,otherCookie)).domains.some(d=>d.id===privateDomain.id));assert.equal((await req('/api/workspace',{action:'domain.save',id:domainId,name:'cannot change shared domain',status:'active'},memberCookie)).status,403);
+ for(const body of [{action:'link.options',id:created.id,options:{}},{action:'link.bulk',operation:'delete',ids:[created.id]},{action:'document.publish',id:doc.id},{action:'key.toggle',id:key.id},{action:'partner.create',id:created.id},{action:'policy.save',policy:{}}])assert.notEqual((await req('/api/features',body,memberCookie)).status,200,'ownership/admin guard: '+body.action);
+ assert.equal((await json('/api/features?section=leads',undefined,memberCookie)).items.length,0);assert.equal((await json('/api/features?section=keys',undefined,memberCookie)).items.length,0);
+ await feature({action:'policy.save',policy:{allowCreate:false,allowEdit:false,requireApproval:true,blockedDomains:['blocked.example']}});assert.equal((await req('/api/workspace',{action:'link.save',domainId,target:'https://example.org/',mode:'page'},memberCookie)).status,403);assert.equal((await req('/api/features',{action:'link.batch',domainId,items:[{target:'https://example.org/'}]},memberCookie)).status,403);
+ const pending=await req('/auth/register',{username:'pending',password});assert.equal(pending.status,200);assert.equal((await pending.json()).pending,true);assert.equal(cookies(pending),'');
+ await feature({action:'policy.save',policy:{blockedDomains:['example.net']}});assert.equal((await req('/feature-one')).status,403);
+ console.log('PASS: free modules, 100-item atomic batch, legacy identity, recycle, expiry, concurrent limits, password version invalidation, device routing, signed event dedup, drafts/versions, forms, templates, seven-type QR, sticky capped group QR, assets, API signatures/replay/ownership, partner revocation, policy gates and registration approval.');
+}finally{await stop();}

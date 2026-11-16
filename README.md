@@ -1,5 +1,36 @@
 # 短链工作台 · 免费方案
 
+## 免费功能扩展（2026-11-17）
+
+后台“功能中心”集中提供分组、100 条批量创建与管理、回收站、行为与渠道、内容页与模板、七类活码、群码、艺术二维码、素材、线索、签名 API、检测与站内提醒。原有短链表单中的“更多设置”统一配置有效期、访问密码、次数上限、分流、模板及渠道，不维护第二套短链记录。
+
+`mode=direct|page` 只负责展示方式，`link_options.config.strategy` 只负责选择目标（固定、权重、设备、条件、失效备用），不会把两个维度混为一谈。旧记录没有 options 时使用原固定目标、原 mode、无密码、无期限和无限额。保留原 10 分钟去重访问统计；新事件表单独记录到达、继续、复制、转化上报，不把点击或上报当作目标加载、网盘转存或成交的证明。内容页的访问与线索也独立统计。
+
+新增迁移 `0002_free_features.sql` 仅新增功能表及可空列；域名原记录为全站共享，新用户自有域名按 owner 隔离。新登记域名先暂停新增，绑定 DNS/HTTPS/Pages 后手动改为正常，避免未绑定域名自动进入域名池。原域名状态不变。回收站保留删除前启停状态；旧版删除记录若无法确定原状态，恢复后保持停用，需在列表显式启用。
+
+模板与内容使用受控区块，支持草稿、发布、复制和历史版本回滚。被短链引用的模板或内容不能直接删除。公开视频只从白名单域名构建嵌入，解析失败降级外链。为保持当前免绑卡部署，视频、大型 PDF、地图等使用外链；本地小素材存于 D1：图片压缩后最多 150 KB、PDF 最多 512 KB，每账号 10 MB，站点共 50 MB。D1 和 Workers 的其他免费额度仍适用，不自动升级套餐。
+
+二维码全部在本地生成，支持七类内容、方形／圆角／圆点、定位角、颜色、尺寸、静默区、纠错和本地 Logo。艺术码使用原始编码矩阵，测试将 SVG 渲染为实际像素后用独立解码器校验。群码根据展示分配次数轮换与限额，同一访客当天粘性不重复占名额；这不是微信实际入群人数或群满状态。
+
+开放 API 端点为 `/api/openapi/shortlink/generate`、`batch`、`list`、`stats`。HMAC-SHA256 签名覆盖方法、原始 path/query、秒级时间戳、nonce 和原始 body SHA256，时钟窗口 300 秒，防重放、可选精确 IP 白名单、每日额度与每分钟 10 次限频。AppSecret 仅首次显示，用既有服务器 secret 派生 AES-GCM 密钥加密后保存；后台列表、调用日志与仓库不包含密钥明文。API 凭据始终按所属用户隔离，不继承管理员全站读取权限。文档内提供 JavaScript、Python、PowerShell 示例。
+
+定时维护通过独立免费 Worker `cloudflare/scheduler.wrangler.jsonc` 每 15 分钟运行，访问入口仍为两个 Pages 域名，维护 Worker 不开放 workers.dev。每轮选 3 条启用失效备用的链接，每条最多探测 3 个最久未检查目标。只对适配的公共网盘域名发起探测，不对任意用户网址做服务端抓取；夸克使用公开分享状态接口，其他适配域名的 200 响应不能据此证明资源有效。连续 3 次明确失效才标记失败，超时与限流保持未知，已确认失败的目标须获明确成功才恢复。通知只在站内显示，微信／短信与付费审核、支付未接入。调用日志保留 30 天；不自动清理用户短链、内容、线索或历史访问。
+
+升级步骤：先私下导出备份，再远程应用迁移，然后部署两个 Pages 项目，最后部署定时维护 Worker。保持原 AUTH_PEPPER 与 SETUP_TOKEN；不得重置账号或重建数据库。
+
+```text
+node scripts/build-pages.mjs
+node --test scripts/share-url.test.mjs scripts/resource-page.test.mjs scripts/feature-boundaries.test.mjs
+node scripts/smoke-test.mjs
+node scripts/features-smoke.mjs
+node scripts/smoke-test.mjs --pages
+node scripts/features-smoke.mjs --pages
+node node_modules/wrangler/bin/wrangler.js d1 migrations apply link-workspace-db --remote
+node node_modules/wrangler/bin/wrangler.js pages deploy --cwd cloudflare/pages --project-name link-workspace-9188 --branch main
+node node_modules/wrangler/bin/wrangler.js pages deploy --cwd cloudflare/pages-share --project-name link-share-9188 --branch main
+node node_modules/wrangler/bin/wrangler.js deploy --config cloudflare/scheduler.wrangler.jsonc
+```
+
 React 前端、独立账号登录、多域名短链、直接跳转及中转页、访问统计、用户管理和账号设置。短链访客无需登录。
 
 当前默认上线方案是 Cloudflare Pages + D1 持久化数据库，使用免费额度，生产地址为 https://link-workspace-9188.pages.dev/ 。接收者的手机网络已确认可以打开 Pages 测试页。

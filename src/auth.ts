@@ -36,9 +36,11 @@ export async function auth(req:Request,path:string,clientKey:string){
   if(setup){if(initialized())authError('管理员已创建',409);const token=process.env.SETUP_TOKEN||'';if(token.length<24)authError('服务尚未配置初始化密钥',503);if(!constantEqual(token,String(body.token||'')))authError('初始化密钥不正确',403);}
   else if(!initialized()||(sqlite.prepare("SELECT value FROM settings WHERE key='registration'").get() as any)?.value!=='1')authError('当前不开放注册',403);
   const {username,password}=credential(body);const salt=randomBytes(16).toString('hex');const derived=await scrypt(password,salt,64) as Buffer;const id=crypto.randomUUID();
-  const stmts=[database.prepare('INSERT INTO users (id,name,email,enabled,created_at) VALUES (?,?,?,1,?)').bind(id,String(body.name||username).slice(0,80),username,Date.now()),database.prepare('INSERT INTO accounts (user_id,username,password) VALUES (?,?,?)').bind(id,username,salt+':'+derived.toString('hex'))];
+  const featurePolicy=JSON.parse((sqlite.prepare("SELECT value FROM settings WHERE key='features'").get() as any)?.value||'{}'),pending=!setup&&!!featurePolicy.requireApproval;
+  const stmts=[database.prepare('INSERT INTO users (id,name,email,enabled,created_at) VALUES (?,?,?,?,?)').bind(id,String(body.name||username).slice(0,80),username,pending?0:1,Date.now()),database.prepare('INSERT INTO accounts (user_id,username,password) VALUES (?,?,?)').bind(id,username,salt+':'+derived.toString('hex'))];
   if(setup){const origin=new URL(req.url).origin;stmts.push(database.prepare("INSERT INTO settings (key,value) VALUES ('owner',?)").bind(id),database.prepare("INSERT INTO domains (id,origin,host,name,status,is_default,created_at) VALUES (?,?,?,?,'active',1,?)").bind(crypto.randomUUID(),origin,new URL(origin).host,'默认域名',Date.now()));}
   try{database.batch(stmts);}catch(e:any){if(String(e.message).includes('UNIQUE'))authError(setup&&initialized()?'管理员已创建':'账号已存在',409);throw e;}
+  if(pending)return Response.json({ok:true,pending:true},{headers:{'Cache-Control':'no-store'}});
   return issue(id,req);
  }
  if(path==='/auth/login'){

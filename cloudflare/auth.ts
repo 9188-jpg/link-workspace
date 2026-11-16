@@ -42,9 +42,11 @@ export async function auth(req:Request,path:string){
   if(setup){if(await initialized())fail('管理员已创建',409);const token=getEnv().SETUP_TOKEN||'';if(token.length<24)fail('服务尚未配置初始化密钥',503);if(!equal(await digest(token),await digest(String(body.token||''))))fail('初始化密钥不正确',403);}
   else if(!await initialized()||(await one("SELECT value FROM settings WHERE key='registration'"))?.value!=='1')fail('当前不开放注册',403);
   const {username,password}=credentials(body),id=crypto.randomUUID(),stored=await encodedPassword(password);
-  const stmts=[database.prepare('INSERT INTO users (id,name,email,enabled,created_at) VALUES (?,?,?,1,?)').bind(id,String(body.name||username).slice(0,80),username,Date.now()),database.prepare('INSERT INTO accounts (user_id,username,password) VALUES (?,?,?)').bind(id,username,stored)];
+  const featurePolicy=JSON.parse((await one("SELECT value FROM settings WHERE key='features'"))?.value||'{}'),pending=!setup&&!!featurePolicy.requireApproval;
+  const stmts=[database.prepare('INSERT INTO users (id,name,email,enabled,created_at) VALUES (?,?,?,?,?)').bind(id,String(body.name||username).slice(0,80),username,pending?0:1,Date.now()),database.prepare('INSERT INTO accounts (user_id,username,password) VALUES (?,?,?)').bind(id,username,stored)];
   if(setup){const origin=new URL(req.url).origin;stmts.push(database.prepare("INSERT INTO settings (key,value) VALUES ('owner',?)").bind(id),database.prepare("INSERT INTO domains (id,origin,host,name,status,is_default,created_at) VALUES (?,?,?,?,'active',1,?)").bind(crypto.randomUUID(),origin,new URL(origin).host,'默认域名',Date.now()));}
   try{await database.batch(stmts);}catch(e:any){if(String(e.message).includes('UNIQUE'))fail(setup&&await initialized()?'管理员已创建':'账号已存在',409);throw e;}
+  if(pending)return Response.json({ok:true,pending:true},{headers:{'Cache-Control':'no-store'}});
   return issue(id,req);
  }
  if(path==='/auth/login'){
