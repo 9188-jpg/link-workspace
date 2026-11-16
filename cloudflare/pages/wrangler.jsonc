@@ -1,0 +1,8 @@
+{
+  "$schema":"../../node_modules/wrangler/config-schema.json",
+  "name":"link-workspace-9188",
+  "pages_build_output_dir":"../../dist-pages",
+  "compatibility_date":"2026-05-15",
+  "compatibility_flags":["nodejs_compat"],
+  "d1_databases":[{"binding":"DB","database_name":"link-workspace-db","database_id":"b3e697da-d8af-4076-b23d-9a805a8f8b66","migrations_dir":"../migrations"}]
+}

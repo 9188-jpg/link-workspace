@@ -5,14 +5,15 @@ import {mkdtemp,mkdir} from 'node:fs/promises';
 import {resolve} from 'node:path';
 import {randomBytes} from 'node:crypto';
 const root=resolve(import.meta.dirname,'..');
-const cloudflare=process.argv.includes('--cloudflare');
+const pages=process.argv.includes('--pages');
+const cloudflare=pages||process.argv.includes('--cloudflare');
 const execute=promisify(execFile);
 await mkdir(resolve(root,'outputs'),{recursive:true});
 const directory=await mkdtemp(resolve(root,'outputs','test-db-'));
 const setupToken=cloudflare?'LOCAL_TEST_ONLY_INITIALIZATION_TOKEN_123456':randomBytes(32).toString('hex'),password=randomBytes(24).toString('base64url');
 const port=String(23000+Math.floor(Math.random()*10000)),origin='http://127.0.0.1:'+port;
 let child,adminCookie='',memberCookie='';
-async function start(){const args=cloudflare?['node_modules/wrangler/bin/wrangler.js','dev','--local','--ip','127.0.0.1','--port',port,'--persist-to',directory,'--var','SETUP_TOKEN:'+setupToken]:['src/server.ts'];child=spawn(process.execPath,args,{cwd:root,env:{...process.env,PORT:port,HOST:'127.0.0.1',DATA_DIR:directory,SETUP_TOKEN:setupToken,PUBLIC_ORIGIN:origin,RENDER:'',CLOUDFLARE_CF_FETCH_ENABLED:'false',WRANGLER_SEND_METRICS:'false'},stdio:['ignore','pipe','pipe']});let logs='';child.stderr.on('data',b=>{logs+=b;});await new Promise((resolve,reject)=>{const timer=setTimeout(()=>reject(new Error('Server failed to start: '+logs)),45000);child.stdout.on('data',b=>{logs+=b;if(String(b).includes(cloudflare?'Ready on':'listening')){clearTimeout(timer);resolve();}});child.once('exit',code=>{clearTimeout(timer);reject(new Error('Server exited: '+code+' '+logs));});});}
+async function start(){const args=pages?[resolve(root,'node_modules/wrangler/bin/wrangler.js'),'pages','dev','--cwd','cloudflare/pages','--ip','127.0.0.1','--port',port,'--persist-to',directory,'--binding','SETUP_TOKEN='+setupToken]:cloudflare?['node_modules/wrangler/bin/wrangler.js','dev','--local','--ip','127.0.0.1','--port',port,'--persist-to',directory,'--var','SETUP_TOKEN:'+setupToken]:['src/server.ts'];child=spawn(process.execPath,args,{cwd:root,env:{...process.env,PORT:port,HOST:'127.0.0.1',DATA_DIR:directory,SETUP_TOKEN:setupToken,PUBLIC_ORIGIN:origin,RENDER:'',CLOUDFLARE_CF_FETCH_ENABLED:'false',WRANGLER_SEND_METRICS:'false'},stdio:['ignore','pipe','pipe']});let logs='';child.stderr.on('data',b=>{logs+=b;});await new Promise((resolve,reject)=>{const timer=setTimeout(()=>reject(new Error('Server failed to start: '+logs)),45000);child.stdout.on('data',b=>{logs+=b;if(String(b).includes(cloudflare?'Ready on':'listening')){clearTimeout(timer);resolve();}});child.once('exit',code=>{clearTimeout(timer);reject(new Error('Server exited: '+code+' '+logs));});});}
 async function stop(){if(!child||child.exitCode!==null)return;const exited=new Promise(resolve=>child.once('exit',resolve));if(cloudflare&&process.platform==='win32')await execute('taskkill',['/PID',String(child.pid),'/T','/F']).catch(()=>{});else child.kill();await exited;}
 async function req(path,body,cookie='',extra={}){return fetch(origin+path,{redirect:'manual',...extra,headers:{...(cookie?{Cookie:cookie}:{}),...(body?{'Content-Type':'application/json','X-Requested-With':'link-workspace',Origin:origin}:{}),...extra.headers},...(body?{method:'POST',body:JSON.stringify(body)}:{})});}
 async function json(path,body,cookie=adminCookie){const r=await req(path,body,cookie);const data=await r.json();assert.equal(r.status,200,JSON.stringify(data));return data;}
@@ -54,5 +55,6 @@ try{
  await req('/auth/logout',undefined,newSession);assert.equal((await req('/api/workspace',undefined,newSession)).status,401);
  console.log('PASS: isolated bootstrap, secure login/session, anonymous public links, role/ownership checks, direct and page redirects, escaping, deduplication, HEAD, disable/delete, retained analytics, validation, CSRF, restart persistence and logout.');
 }finally{await stop();}
+
 
 

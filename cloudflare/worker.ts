@@ -16,7 +16,8 @@ export default {fetch(req:Request,env:WorkerEnv){return withEnv(env,async()=>{
   if(path.startsWith('/auth/'))response=await auth(req,path);
   else if(path==='/api/workspace')response=req.method==='GET'?await api.GET(req):req.method==='POST'?await api.POST(req):Response.json({error:'不支持的请求方式'},{status:405});
   else if(['/','/admin','/dashboard','/setup','/register'].includes(path)){
-   response=await env.ASSETS.fetch(new Request(new URL('/index.html',url),req));
+   response=await env.ASSETS.fetch(new Request(new URL('/',url),req));
+   if(response.status===404)response=await env.ASSETS.fetch(new Request(new URL('/index.html',url),req));
    response=new Response(response.body,response);response.headers.set('Cache-Control','no-store');response.headers.set('Content-Security-Policy',"default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; object-src 'none'; base-uri 'self'; frame-ancestors 'none'");
   }else if(path.startsWith('/assets/'))response=await env.ASSETS.fetch(req);
   else if(/^\/[a-zA-Z0-9_-]{3,64}$/.test(path)&&['GET','HEAD'].includes(req.method))response=await redirect[req.method as 'GET'|'HEAD'](req,{params:Promise.resolve({slug:path.slice(1)})});

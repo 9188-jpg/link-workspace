@@ -12,7 +12,8 @@
     "check": "tsc --noEmit",
     "test": "node scripts/smoke-test.mjs",
     "cf:dev": "wrangler dev --ip 127.0.0.1",
-    "cf:build": "npm run build && wrangler deploy --dry-run"
+    "cf:build": "npm run build && wrangler deploy --dry-run",
+    "cf:pages-build": "node scripts/build-pages.mjs"
   },
   "dependencies": {
     "react": "19.2.6",
