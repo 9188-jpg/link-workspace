@@ -1,3 +1,4 @@
+import {shouldFeishuHandoff,renderFeishuHandoff} from '../feishu-handoff.ts';
 import {visibleOnceScript} from '../traffic.ts';
 import {features} from '../feature-instance.ts';
 import {one,run,day,escapeHtml as e,reserved} from '../core.ts';
@@ -13,6 +14,8 @@ async function handle(req:Request,slug:string,count:boolean){
   if(fallback?.value&&new URL(fallback.value).href!==url.href&&new URL(fallback.value).host!==url.host)return new Response(null,{status:302,headers:{Location:fallback.value,'Cache-Control':'no-store','Referrer-Policy':'no-referrer'}});
   return new Response(page('链接暂不可用','该链接不存在或已停止访问，请联系分享者。','',null),{status:404,headers:baseHeaders});
  }
+ // Hand off before access counters and event tokens: the browser arrival is the actual visit.
+ if(shouldFeishuHandoff(req))return renderFeishuHandoff(req);
  const feature=await features.route.resolve(req,item,count);if('response' in feature)return feature.response;item.target=feature.target;const browser=feature.browser;
  const headers={...baseHeaders,'Set-Cookie':`lw_browser=${browser}; Path=/; HttpOnly; SameSite=Lax; Max-Age=31536000${url.protocol==='https:'?'; Secure':''}`};
  const attributionCookie=`lw_attribution=${feature.eventToken}; Path=/; HttpOnly; SameSite=Lax; Max-Age=3600${url.protocol==='https:'?'; Secure':''}`;const responseHeaders=new Headers(headers);responseHeaders.append('Set-Cookie',attributionCookie);

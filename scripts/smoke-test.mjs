@@ -33,6 +33,10 @@ try{
  const link=await json('/api/workspace',{action:'link.save',domainId,slug:'shared-demo',title:'<script>escaped</script>',target:'https://example.com/path?q=1#fragment',mode:'page'});
  const direct=await json('/api/workspace',{action:'link.save',domainId,slug:'direct-demo',target:'https://example.org/',mode:'direct'});
  await req('/shared-demo',undefined,'',{method:'HEAD'});assert.equal((await json('/api/workspace')).stats.visits,0);
+ const feishuAgent='Mozilla/5.0 Android Lark/7.20.5';
+ for(const slug of ['shared-demo','direct-demo']){const gate=await req('/'+slug,undefined,'',{headers:{'User-Agent':feishuAgent}}),body=await gate.text();assert.equal(gate.status,200);assert(body.includes('id="open-browser"'));assert(body.includes("window.open(target,'NO_INTERCEPT')"));assert(!body.includes('const eventToken='));const marked=await req('/'+slug+'?lk_mobile_jump_to_browser=true&lk_jump_to_browser=true',undefined,'',{headers:{'User-Agent':feishuAgent}}),content=await marked.text();assert(!content.includes('id="open-browser"'),'marked arrival must not loop');assert(slug==='direct-demo'?content.includes('location.replace("https://example.org/")'):content.includes('id="resource-title"'),'handoff must retain direct/page behavior');}
+ assert.equal((await json('/api/workspace')).stats.visits,0,'handoff requests must not record visits');
+ const previewGate=await (await req('/shared-demo',undefined,'',{headers:{'User-Agent':'LarkUrlPreviewBot'}})).text();assert(!previewGate.includes('id="open-browser"'));
  const publicShare=new URL(browserShareUrl(origin+'/shared-demo'));
  let publicPage=await req(publicShare.pathname+publicShare.search),html=await publicPage.text();assert.equal(publicPage.status,200);assert(html.includes('点击跳转'));assert(html.includes('&lt;script&gt;escaped&lt;/script&gt;'));assert(html.includes('q=1#fragment'));assert(!html.includes('lk_jump_to_browser'),'share flags must not alter the target');
  assert.equal((await json('/api/workspace')).stats.visits,0,'HTTP loading alone is not a confirmed visit');
