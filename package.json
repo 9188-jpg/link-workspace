@@ -10,7 +10,7 @@
     "build": "vite build",
     "start": "node src/server.ts",
     "check": "tsc --noEmit",
-    "test": "node --test scripts/share-url.test.mjs scripts/resource-page.test.mjs scripts/feature-boundaries.test.mjs && node scripts/smoke-test.mjs && node scripts/features-smoke.mjs",
+    "test": "node --test scripts/share-url.test.mjs scripts/resource-page.test.mjs scripts/feature-boundaries.test.mjs scripts/traffic.test.mjs scripts/feishu-handoff.test.mjs scripts/workspace-refresh.test.mjs && node scripts/smoke-test.mjs && node scripts/features-smoke.mjs",
     "cf:dev": "wrangler dev --ip 127.0.0.1",
     "cf:build": "npm run build && wrangler deploy --dry-run",
     "cf:pages-build": "node scripts/build-pages.mjs",

@@ -176,3 +176,9 @@ npx wrangler deploy --dry-run
 Cloudflare Pages 的本地完整流程测试：
 node scripts/smoke-test.mjs --pages
 
+
+## 后台刷新
+
+工作台按页面、域名、关键词、日期和统计口径隔离数据。切换范围时先等待对应结果，取消旧请求并忽略迟到响应；删除成功后立即移除列表行。已删除链接的历史统计保留在统计页和回收站中。
+
+已登录的首次加载复用认证请求返回的工作台数据，不再重复读取。Cloudflare 端会话身份合并为一次查询，工作台的独立读取使用一个 D1 batch；不缓存账号权限或管理接口。`Server-Timing` 中的 `auth` 和 `workspace` 可用于排查服务端耗时。客户端并发、删除竞态和初始化重复请求由 `scripts/workspace-refresh.test.mjs` 覆盖，Node/Pages 回归使用隔离数据库。

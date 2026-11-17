@@ -4,6 +4,7 @@ import {sessionUser} from './auth.ts';
 export const day = (time=Date.now()) => new Intl.DateTimeFormat('sv-SE',{timeZone:'Asia/Shanghai',year:'numeric',month:'2-digit',day:'2-digit'}).format(time);
 export function db(){ return database; }
 export async function all(sql:string,...args:any[]){return (await db().prepare(sql).bind(...args).all()).results as any[];}
+export async function readBatch(queries:import('../src/workspace-read.ts').WorkspaceQuery[]){return (await db().batch(queries.map(q=>db().prepare(q.sql).bind(...q.args)))).map(r=>r.results as any[]);}
 export async function one(sql:string,...args:any[]){return db().prepare(sql).bind(...args).first() as any;}
 export async function run(sql:string,...args:any[]){return db().prepare(sql).bind(...args).run();}
 export function fail(message:string,status=400):never{throw Object.assign(new Error(message),{status});}
