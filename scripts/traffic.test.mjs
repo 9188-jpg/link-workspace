@@ -7,7 +7,7 @@ import {measurableRequest,visibleOnceScript} from '../src/traffic.ts';
 import {documentFeatures} from '../src/feature-documents.ts';
 import {randomCode} from '../src/link-rules.ts';
 
-test('known preview clients, bots and speculative loads cannot be measured',()=>{
+test('known preview clients, bots and speculative loads cannot submit browser actions',()=>{
  for(const agent of ['Twitterbot/1.0','facebookexternalhit/1.1','TelegramBot','WhatsApp/2','Slackbot-LinkExpanding','Googlebot','FeishuUrlPreview'])assert.equal(measurableRequest(new Request('https://a.test',{headers:{'User-Agent':agent}})),false,agent);
  for(const purpose of ['prefetch','prefetch;prerender','preview'])assert.equal(measurableRequest(new Request('https://a.test',{headers:{'Sec-Purpose':purpose}})),false);
  assert(measurableRequest(new Request('https://a.test',{headers:{'User-Agent':'Mozilla/5.0 Android TwitterAndroid'}})));

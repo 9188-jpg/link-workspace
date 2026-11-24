@@ -11,6 +11,35 @@ export function artSvg(value:string,{dark='#26324a',light='#ffffff',margin=4,ecc
 }
 export async function svgPng(svg:string,size=512){const url='data:image/svg+xml;base64,'+btoa(unescape(encodeURIComponent(svg)));const image=await new Promise<HTMLImageElement>((resolve,reject)=>{const image=new Image();image.onload=()=>resolve(image);image.onerror=()=>reject(new Error('二维码图片未能加载'));image.src=url;});const canvas=document.createElement('canvas');canvas.width=canvas.height=size;canvas.getContext('2d')!.drawImage(image,0,0,size,size);return canvas.toDataURL('image/png');}
 export async function prepareImage(file:File,maxBytes=140000){
- if(!/^image\/(png|jpeg|webp)$/.test(file.type))throw new Error('请选择 PNG、JPEG 或 WebP 图片');if(file.size>20*1024*1024)throw new Error('原图最大 20 MB');
- const url=URL.createObjectURL(file);try{const image=await new Promise<HTMLImageElement>((resolve,reject)=>{const image=new Image();image.onload=()=>resolve(image);image.onerror=reject;image.src=url;});const canvas=document.createElement('canvas');const ratio=Math.min(1,1280/Math.max(image.width,image.height));canvas.width=Math.max(1,Math.round(image.width*ratio));canvas.height=Math.max(1,Math.round(image.height*ratio));canvas.getContext('2d')!.drawImage(image,0,0,canvas.width,canvas.height);for(const quality of [.85,.7,.55,.4]){const data=canvas.toDataURL('image/webp',quality);if(atob(data.split(',')[1]).length<=maxBytes)return data;}throw new Error('压缩后仍过大，请缩小图片后上传');}finally{URL.revokeObjectURL(url);}
+ if(!/^image\/(png|jpeg|webp)$/.test(file.type))throw new Error('请选择 PNG、JPEG 或 WebP 图片');
+ if(file.size>20*1024*1024)throw new Error('原图最大 20 MB');
+
+ // Decode the local file directly so compression works under the admin page's image policy.
+ const image=typeof createImageBitmap==='function'
+  ? await createImageBitmap(file).catch(()=>{throw new Error('无法解码这张图片，请检查文件是否损坏');})
+  : await new Promise<HTMLImageElement>((resolve,reject)=>{
+   const reader=new FileReader();
+   reader.onerror=()=>reject(new Error('无法读取本地图片'));
+   reader.onload=()=>{
+    const img=new Image();
+    img.onload=()=>resolve(img);
+    img.onerror=()=>reject(new Error('无法解码这张图片，请检查文件是否损坏'));
+    img.src=String(reader.result);
+   };
+   reader.readAsDataURL(file);
+  });
+ try{
+  const canvas=document.createElement('canvas');
+  const ratio=Math.min(1,1280/Math.max(image.width,image.height));
+  canvas.width=Math.max(1,Math.round(image.width*ratio));
+  canvas.height=Math.max(1,Math.round(image.height*ratio));
+  canvas.getContext('2d')!.drawImage(image,0,0,canvas.width,canvas.height);
+  for(const quality of [.85,.7,.55,.4]){
+   const data=canvas.toDataURL('image/webp',quality);
+   if(atob(data.split(',')[1]).length<=maxBytes)return data;
+  }
+  throw new Error('压缩后仍过大，请缩小图片后上传');
+ }finally{
+  if('close' in image)image.close();
+ }
 }

@@ -77,6 +77,15 @@ try{
  const dailyResult=await json('/api/workspace'+dailyParams,undefined,newSession);assert.deepEqual(dailyResult.daily.map(d=>d.visits),[0,5,2]);assert.equal(dailyResult.items.find(x=>x.id===link.id).visits,3);assert.equal(dailyResult.items.find(x=>x.id===direct.id).visits,4);
  assert.deepEqual(dailyResult.linkDaily.filter(x=>x.link_id===link.id).map(x=>[x.date,x.visits]),[[yesterday,2],[today,1]]);assert.equal(dailyResult.linkDaily.reduce((n,x)=>n+x.visits,0),7);
  const linkDetail=await json('/api/workspace'+dailyParams+'&link='+link.id,undefined,newSession);assert.deepEqual(linkDetail.detail.map(x=>x.visits),[0,2,1]);assert(linkDetail.items.some(x=>x.id===link.id&&x.deleted_at),'deleted link daily history must remain visible');
+ const reports='/api/features?'+new URLSearchParams({section:'trafficReport',kind:'links',from:emptyDay,to:today});
+ const aggregateReport=await json(reports+'&domain='+domainId,undefined,newSession);
+ const singleReport=await json(reports+'&domain='+domainId+'&id='+link.id,undefined,newSession);
+ assert.deepEqual(aggregateReport.daily.map(x=>x.visits),[0,5,2]);
+ assert.deepEqual(singleReport.daily.map(x=>[x.visits,x.clicks]),[[0,0],[2,0],[1,1]]);
+ assert.equal(singleReport.lifetime.visits,3);assert.equal(singleReport.lifetime.clicks,1);
+ assert(singleReport.ranking.every(item=>item.key===link.id),'single-link report stays isolated after deletion');
+ assert.equal((await req(reports+'&id='+link.id+'&domain=unrelated',undefined,newSession)).status,404);
+ assert.equal((await req(reports+'&id='+link.id,undefined,memberCookie)).status,404);
  const searched=await json('/api/workspace'+dailyParams+'&q=shared-demo',undefined,newSession);assert(searched.linkDaily.every(x=>x.link_id===link.id));assert.equal(searched.items.length,1);
  const legacyDaily=await json('/api/workspace'+dailyParams+'&traffic=legacy',undefined,newSession);assert.equal(legacyDaily.linkDaily.reduce((n,x)=>n+x.visits,0),4);
  const isolatedDaily=await json('/api/workspace'+dailyParams,undefined,memberCookie);assert.equal(isolatedDaily.linkDaily.length,0);assert.equal((await req('/api/workspace'+dailyParams+'&link='+link.id,undefined,memberCookie)).status,404);

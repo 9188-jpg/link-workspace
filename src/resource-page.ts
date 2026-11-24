@@ -1,5 +1,6 @@
-import {renderGuideParagraphs} from './resource-copy.ts';
 import {visibleOnceScript} from './traffic.ts';
+import {renderGuideParagraphs} from './resource-copy.ts';
+
 type ResourcePageOptions = {title:string;target:string;nonce:string;userAgent:string;eventToken?:string;brand?:string;guideTexts?:string[]};
 const html = (value:string) => value.replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]!));
 const json = (value:unknown) => JSON.stringify(value).replace(/</g,'\\u003c');

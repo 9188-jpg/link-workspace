@@ -15,7 +15,9 @@ export default {fetch(req:Request,env:WorkerEnv){return withEnv(env,async()=>{
    req=new Request(req,{body:text});
   }
   let response:Response;
-  if(path.startsWith('/auth/'))response=await auth(req,path);
+  const home=path==='/'?await features.homepage(req):null;
+  if(home)response=home;
+  else if(path.startsWith('/auth/'))response=await auth(req,path);
   else if(path==='/api/features')response=await features.handle(req);
   else if(path.startsWith('/api/public/')||path.startsWith('/api/openapi/')||path.startsWith('/p/')||path.startsWith('/partner/')||path.startsWith('/media/')||path.startsWith('/legal/'))response=await features.publicRoute(req);
   else if(path==='/api/workspace')response=req.method==='GET'?await api.GET(req):req.method==='POST'?await api.POST(req):Response.json({error:'不支持的请求方式'},{status:405});

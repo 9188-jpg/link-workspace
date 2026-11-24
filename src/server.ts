@@ -23,7 +23,9 @@ const server=createServer(async(incoming,outgoing)=>{
   const method=incoming.method||'GET';
   const req=new Request(url,{method,headers,...(['GET','HEAD'].includes(method)?{}:{body:Buffer.concat(chunks)})});
   let result:Response;
-  if(url.pathname.startsWith('/auth/'))result=await auth(req,url.pathname,incoming.socket.remoteAddress||'unknown');
+  const home=url.pathname==='/'?await features.homepage(req):null;
+  if(home)result=home;
+  else if(url.pathname.startsWith('/auth/'))result=await auth(req,url.pathname,incoming.socket.remoteAddress||'unknown');
   else if(url.pathname==='/api/features')result=await features.handle(req);
   else if(url.pathname.startsWith('/api/public/')||url.pathname.startsWith('/api/openapi/')||url.pathname.startsWith('/p/')||url.pathname.startsWith('/partner/')||url.pathname.startsWith('/media/')||url.pathname.startsWith('/legal/'))result=await features.publicRoute(req);
   else if(url.pathname==='/api/workspace'){

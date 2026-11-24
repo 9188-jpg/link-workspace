@@ -1,5 +1,7 @@
 import {cleanOptions} from './feature-routing.ts';
 import {day,fail,type Row} from './feature-types.ts';
+import {displayHost,displayOrigin} from './domain-display.ts';
+import {shareAliasFor,shareOrigin} from './share-url.ts';
 
 export type WorkspaceQuery={sql:string;args:any[]};
 export type WorkspaceReadBatch=(queries:WorkspaceQuery[])=>Promise<Row[][]>;
@@ -21,11 +23,11 @@ export async function readWorkspace(req:Request,u:Row,readBatch:WorkspaceReadBat
  add('stats',`SELECT count(*) total,coalesce(sum(CASE WHEN l.enabled=1 AND d.status!='disabled' AND u.enabled=1 THEN 1 ELSE 0 END),0) active FROM links l JOIN domains d ON d.id=l.domain_id JOIN users u ON u.id=l.owner_id WHERE l.deleted_at IS NULL AND ${filters}`,...args);
  add('visits',`SELECT count(*) n FROM visits v JOIN links l ON l.id=v.link_id WHERE v.verified=${verified} AND ${filters}`,...args);
  if(u.admin)add('users','SELECT count(*) n FROM users WHERE id!=?',u.id);
- if(kind==='links')add('items',`SELECT l.*,coalesce(d.public_origin,d.origin) origin,d.host,d.status domain_status,u.name owner_name,u.enabled owner_enabled,(SELECT count(*) FROM visits WHERE verified=${verified} AND link_id=l.id) visits,o.config _options_config,o.password_hash _options_password,o.access_count FROM links l JOIN domains d ON d.id=l.domain_id JOIN users u ON u.id=l.owner_id LEFT JOIN link_options o ON o.link_id=l.id WHERE l.deleted_at IS NULL AND ${filters} AND (?='' OR instr(lower(l.title||' '||l.target||' '||l.slug),lower(?))>0) ORDER BY l.created_at DESC`,...args,search,search);
+ if(kind==='links')add('items',`SELECT l.*,coalesce(d.public_origin,d.origin) origin,d.origin canonical_origin,d.host,d.status domain_status,u.name owner_name,u.enabled owner_enabled,(SELECT count(*) FROM visits WHERE verified=${verified} AND link_id=l.id) visits,o.config _options_config,o.password_hash _options_password,o.access_count FROM links l JOIN domains d ON d.id=l.domain_id JOIN users u ON u.id=l.owner_id LEFT JOIN link_options o ON o.link_id=l.id WHERE l.deleted_at IS NULL AND ${filters} AND (?='' OR instr(lower(l.title||' '||l.target||' '||l.slug),lower(?))>0) ORDER BY l.created_at DESC`,...args,search,search);
  if(kind==='analytics'){
   add('daily',`SELECT v.day,count(*) visits FROM visits v JOIN links l ON l.id=v.link_id WHERE v.verified=${verified} AND ${filters} AND v.day BETWEEN ? AND ? GROUP BY v.day ORDER BY v.day`,...args,from,to);
   // Deleted links remain in historical reports, but never in the active links view.
-  add('items',`SELECT l.id,l.title,l.slug,coalesce(d.public_origin,d.origin) origin,d.host,l.deleted_at,count(v.id) visits FROM links l JOIN domains d ON d.id=l.domain_id LEFT JOIN visits v ON v.link_id=l.id AND v.verified=${verified} AND v.day BETWEEN ? AND ? WHERE ${filters} AND (?='' OR instr(lower(l.title||' '||l.slug),lower(?))>0) GROUP BY l.id ORDER BY visits DESC,l.created_at DESC`,from,to,...args,search,search);
+  add('items',`SELECT l.id,l.title,l.slug,coalesce(d.public_origin,d.origin) origin,d.origin canonical_origin,d.host,l.deleted_at,json_extract(o.config,'$.shareAlias') _share_alias,count(v.id) visits FROM links l JOIN domains d ON d.id=l.domain_id LEFT JOIN link_options o ON o.link_id=l.id LEFT JOIN visits v ON v.link_id=l.id AND v.verified=${verified} AND v.day BETWEEN ? AND ? WHERE ${filters} AND (?='' OR instr(lower(l.title||' '||l.slug),lower(?))>0) GROUP BY l.id ORDER BY visits DESC,l.created_at DESC`,from,to,...args,search,search);
   add('linkDaily',`SELECT v.link_id,v.day date,count(*) visits FROM visits v JOIN links l ON l.id=v.link_id WHERE v.verified=${verified} AND ${filters} AND v.day BETWEEN ? AND ? AND (?='' OR instr(lower(l.title||' '||l.slug),lower(?))>0) GROUP BY v.link_id,v.day ORDER BY v.day`,...args,from,to,search,search);
   if(p.get('link'))add('detail',`SELECT l.id,v.day,count(v.id) visits FROM links l LEFT JOIN visits v ON v.link_id=l.id AND v.verified=${verified} AND v.day BETWEEN ? AND ? WHERE l.id=? AND ${filters} GROUP BY l.id,v.day`,from,to,p.get('link'),...args);
  }
@@ -33,13 +35,21 @@ export async function readWorkspace(req:Request,u:Row,readBatch:WorkspaceReadBat
  if(kind==='settings')add('settings',"SELECT key,value FROM settings WHERE key IN ('registration','fallback')");
  add('sparkline',`SELECT v.day,count(*) visits FROM visits v JOIN links l ON l.id=v.link_id WHERE v.verified=${verified} AND ${filters} AND v.timestamp>=? GROUP BY v.day ORDER BY v.day`,...args,Date.now()-7*86400000);
  add('groups','SELECT * FROM link_groups WHERE owner_id=? ORDER BY position,created_at',u.id);
- add('templates',"SELECT id,name,owner_id FROM documents WHERE kind='template' AND published IS NOT NULL AND deleted_at IS NULL AND owner_id=?",u.id);
+ add('templates',"SELECT id,name,owner_id,json_extract(published,'$.layout') layout FROM documents WHERE kind='template' AND published IS NOT NULL AND deleted_at IS NULL AND owner_id=?",u.id);
  const lists=await readBatch(queries),get=(name:string)=>slots.has(name)?lists[slots.get(name)!]:[];
  const stats=get('stats')[0];stats.visits=get('visits')[0].n;if(u.admin)stats.users=get('users')[0].n;
- const result:Row={user:{id:u.id,name:u.name,email:u.email,admin:u.admin},domains:get('domains'),stats,traffic:verified?'verified':'legacy',sparkline:get('sparkline'),groups:get('groups'),templates:get('templates')};
+ const domains=get('domains').map(d=>{
+  const alias=shareAliasFor(d.origin);
+  return {...d,display_host:displayHost(d.host),display_origin:displayOrigin(d.origin),share_alias:alias,display_share_alias:alias?displayOrigin(alias):''};
+ });
+ const result:Row={user:{id:u.id,name:u.name,email:u.email,admin:u.admin},domains,stats,traffic:verified?'verified':'legacy',sparkline:get('sparkline'),groups:get('groups'),templates:get('templates')};
  if(slots.has('items'))result.items=get('items');
- if(kind==='links')result.items=result.items.map(({_options_config,_options_password,...row}:Row)=>({...row,options:cleanOptions(JSON.parse(_options_config||'{}')),hasPassword:!!_options_password,access_count:row.access_count||0}));
+ if(kind==='links')result.items=result.items.map(({_options_config,_options_password,canonical_origin,...row}:Row)=>{
+  const options=cleanOptions(JSON.parse(_options_config||'{}'));
+  return {...row,origin:shareOrigin(canonical_origin,row.origin,options.shareAlias),options,hasPassword:!!_options_password,access_count:row.access_count||0};
+ });
  if(kind==='analytics'){
+  result.items=result.items.map(({canonical_origin,_share_alias,...row}:Row)=>({...row,origin:shareOrigin(canonical_origin,row.origin,_share_alias)}));
   const pad=(rows:Row[])=>{const counts=new Map(rows.map(r=>[r.day,r.visits]));return dates.map(date=>({date,visits:counts.get(date)||0}));};
   result.daily=pad(get('daily'));result.linkDaily=get('linkDaily');
   if(p.get('link')){if(!get('detail').length)fail('链接不存在',404);result.detail=pad(get('detail'));}

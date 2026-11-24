@@ -1,5 +1,6 @@
 import {cleanGuideTexts} from './resource-copy.ts';
 import {measurableRequest} from './traffic.ts';
+import {shareAliasFor} from './share-url.ts';
 import {type FeatureContext,type Row,statements,fail,safeUrl,text,uid,day,htmlPage,e,js,reply} from './feature-types.ts';
 const encoder=new TextEncoder();
 export const hex=(v:ArrayBuffer)=>Array.from(new Uint8Array(v),x=>x.toString(16).padStart(2,'0')).join('');
@@ -19,7 +20,7 @@ export function cleanOptions(input:any){
  if(['weighted','failover'].includes(strategy)&&!targets.length)fail('此分流方式至少需要一个候选目标');
  const expires=source.expires?Number(source.expires):null;if(expires&&(!Number.isSafeInteger(expires)||expires<0))fail('有效期格式不正确');
  const limit=Number(source.limit)||0;if(!Number.isSafeInteger(limit)||limit<0||limit>1e9)fail('访问上限需为 0–10亿的整数');
- return {guideTexts:cleanGuideTexts(source.guideTexts),groupId:text(source.groupId,50),expires,limit,strategy,targets,devices,rules,fallback:source.fallback?safeUrl(source.fallback):'',templateId:text(source.templateId,50),channel:text(source.channel,80),conversionValue:Math.max(0,Math.min(1e8,Number(source.conversionValue)||0))};
+ return {guideTexts:cleanGuideTexts(source.guideTexts),groupId:text(source.groupId,50),expires,limit,strategy,targets,devices,rules,fallback:source.fallback?safeUrl(source.fallback):'',templateId:text(source.templateId,50),channel:text(source.channel,80),conversionValue:Math.max(0,Math.min(1e8,Number(source.conversionValue)||0)),shareAlias:text(source.shareAlias,255)};
 }
 export function selectTarget(config:Row,base:string,req:Request,health:Row[]=[],random=Math.random(),now=Date.now()){
  const info=deviceInfo(req.headers.get('user-agent')||''),url=new URL(req.url),channel=text(url.searchParams.get('utm_source')||url.searchParams.get('channel')||config.channel,80),country=String((req as any).cf?.country||'').toUpperCase();
@@ -35,9 +36,11 @@ export function routing(ctx:FeatureContext){
  async function rate(key:string,max:number,seconds=60){const bucket=Math.floor(Date.now()/(seconds*1000));const id=await sha(key+':'+bucket);const r=await one('INSERT INTO feature_limits (key,attempts,expires) VALUES (?,1,?) ON CONFLICT(key) DO UPDATE SET attempts=attempts+1 RETURNING attempts',id,Date.now()+seconds*1000);if(Number(r?.attempts)>max)fail('操作频繁，请稍后重试',429);}
  async function settings(){const row=await one("SELECT value FROM settings WHERE key='features'");try{return JSON.parse(row?.value||'{}');}catch{return {};}}
  async function allowedTarget(target:string){const policy=await settings(),host=new URL(safeUrl(target)).hostname;if((policy.blockedDomains||[]).some((h:string)=>host===h||host.endsWith('.'+h)))fail('目标域名已被站点停用',403);return policy;}
- async function owned(u:Row,id:string,deleted=false){const row=await one('SELECT l.*,coalesce(d.public_origin,d.origin) origin,d.host,d.status domain_status,u.enabled owner_enabled FROM links l JOIN domains d ON d.id=l.domain_id JOIN users u ON u.id=l.owner_id WHERE l.id=?'+(deleted?'':' AND l.deleted_at IS NULL'),id);if(!row||!u.admin&&row.owner_id!==u.id)fail('链接不存在',404);return row!;}
+ async function owned(u:Row,id:string,deleted=false){const row=await one('SELECT l.*,coalesce(d.public_origin,d.origin) origin,d.origin canonical_origin,d.host,d.status domain_status,u.enabled owner_enabled FROM links l JOIN domains d ON d.id=l.domain_id JOIN users u ON u.id=l.owner_id WHERE l.id=?'+(deleted?'':' AND l.deleted_at IS NULL'),id);if(!row||!u.admin&&row.owner_id!==u.id)fail('链接不存在',404);return row!;}
  async function prepareConfig(u:Row,id:string,input:Row,itemOverride?:Row){const item=itemOverride||await owned(u,id),config=cleanOptions(input);if(config.groupId&&!await one('SELECT id FROM link_groups WHERE id=? AND owner_id=?',config.groupId,item.owner_id))fail('分组不存在');if(config.templateId&&!await one("SELECT id FROM documents WHERE id=? AND owner_id=? AND kind='template' AND published IS NOT NULL AND deleted_at IS NULL",config.templateId,item.owner_id))fail('请选择已发布的模板');for(const t of [...config.targets.map((t:Row)=>t.url),...Object.values(config.devices),...config.rules.map((r:Row)=>r.url),...(config.fallback?[config.fallback]:[])])await allowedTarget(String(t));
   const previous=await one('SELECT * FROM link_options WHERE link_id=?',id);let password=previous?.password_hash||'',version=previous?.access_version||uid();if(input.clearPassword){password='';version=uid();}if(input.password){if(String(input.password).length<6||String(input.password).length>128)fail('访问密码需为 6–128 位');password=await hashPassword(input.password);version=uid();}
+  if (!Object.hasOwn(input,'shareAlias')) config.shareAlias=text(JSON.parse(previous?.config||'{}').shareAlias,255);
+  if (config.shareAlias && config.shareAlias!==shareAliasFor(item.canonical_origin)) fail('所选别名不属于这个域名');
   return {config,statement:db.prepare('INSERT INTO link_options (link_id,config,password_hash,access_version) VALUES (?,?,?,?) ON CONFLICT(link_id) DO UPDATE SET config=excluded.config,password_hash=excluded.password_hash,access_version=excluded.access_version').bind(id,JSON.stringify(config),password,version)};
  }
  async function configFor(id:string){const row=await one('SELECT * FROM link_options WHERE link_id=?',id);return {row,config:cleanOptions(JSON.parse(row?.config||'{}'))};}
@@ -63,8 +66,18 @@ export function routing(ctx:FeatureContext){
   if(path==='/api/public/unlock'){const id=text(b.id,50);await rate('unlock:'+id+':'+(ctx.ip?.(req)||'local'),12,900);const row=await one('SELECT o.*,l.enabled,l.deleted_at,u.enabled owner_enabled,d.status domain_status FROM link_options o JOIN links l ON l.id=o.link_id JOIN users u ON u.id=l.owner_id JOIN domains d ON d.id=l.domain_id WHERE o.link_id=?',id);if(!row||!row.enabled||row.deleted_at||!row.owner_enabled||row.domain_status==='disabled'||!row.password_hash||String(b.password||'').length>128||!await checkPassword(String(b.password||''),row.password_hash))fail('访问密码不正确',403);const token=await sign({id,version:row.access_version,expires:Date.now()+3600000});return new Response(JSON.stringify({ok:true}),{headers:{'Content-Type':'application/json','Cache-Control':'no-store','Set-Cookie':`lw_access_${id.replaceAll('-','')}=${token}; Path=/; HttpOnly; SameSite=Lax; Max-Age=3600${new URL(req.url).protocol==='https:'?'; Secure':''}`}});}
   if(path==='/api/public/document-event'){
    const token=await verify(text(b.token,3000));if(!token||token.type!=='document')fail('事件校验失败',403);if(!token.measure||!measurableRequest(req))return reply({ok:true,recorded:false});
-   const d=await one('SELECT d.id FROM documents d JOIN users u ON u.id=d.owner_id WHERE d.id=? AND d.published IS NOT NULL AND d.deleted_at IS NULL AND u.enabled=1',token.id);if(!d)fail('内容不存在',404);
-   await run('INSERT INTO document_events(id,document_id,visitor,kind,timestamp,day,verified) SELECT ?,?,?,?,?,?,1 WHERE NOT EXISTS(SELECT 1 FROM document_events WHERE verified=1 AND document_id=? AND visitor=? AND kind=? AND timestamp>?)',uid(),token.id,token.browser,'arrival',Date.now(),day(),token.id,token.browser,'arrival',Date.now()-600000);return reply({ok:true});
+   const d=await one('SELECT d.published FROM documents d JOIN users u ON u.id=d.owner_id WHERE d.id=? AND d.published IS NOT NULL AND d.deleted_at IS NULL AND u.enabled=1',token.id);if(!d)fail('内容不存在',404);
+   const entry=text(b.entry,50),now=Date.now(),today=day(now);
+   if(entry){
+    const shared=token.templateId?await one(`SELECT d.published FROM documents d JOIN users u ON u.id=d.owner_id
+     WHERE d.id=? AND d.kind='template' AND d.published IS NOT NULL AND d.deleted_at IS NULL AND u.enabled=1`,token.templateId):null;
+    if(token.templateId&&!shared)fail('入口不存在',404);
+    const body=JSON.parse(shared?.published||d.published);
+    if(body.layout!==(shared?'collection':'profile')||!body.blocks.some((block:Row)=>block.id===entry&&block.type==='link'&&block.enabled!==false&&block.url))fail('入口不存在',404);
+   }
+   const event=(kind:string)=>db.prepare('INSERT INTO document_events(id,document_id,visitor,kind,timestamp,day,verified) SELECT ?,?,?,?,?,?,1 WHERE NOT EXISTS(SELECT 1 FROM document_events WHERE verified=1 AND document_id=? AND visitor=? AND kind=? AND timestamp>?)').bind(uid(),token.id,token.browser,kind,now,today,token.id,token.browser,kind,now-600000);
+   await db.batch(entry?[event('arrival'),event('click:'+entry)]:[event('arrival')]);
+   return reply({ok:true});
   }
   if(path==='/api/public/event'){
    const token=await verify(text(b.token,3000));if(!token||!['arrival','click','redirect','copy','conversion'].includes(b.kind))fail('事件校验失败',403);

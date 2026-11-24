@@ -54,7 +54,7 @@ function runtime({ua=android,clipboard=true,copySuccess=true}={}){
  return {elements,writes,timers,syncCopies:()=>syncCopies};
 }
 
-test('loading the page performs no clipboard write, clipboard action or automatic navigation',()=>{
+test('loading the page performs no clipboard action and only schedules the arrival receipt',()=>{
  const r=runtime();assert.equal(r.writes.length,0);assert.equal(r.syncCopies(),0);assert.equal(r.timers.length,1);
  assert.equal(typeof r.elements['open-resource'].events.click,'function');
  const normal=runtime({ua:safari});normal.elements['open-resource'].events.click();assert.equal(normal.timers.length,1);assert.equal(normal.syncCopies(),0);
