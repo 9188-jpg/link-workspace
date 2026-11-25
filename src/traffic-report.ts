@@ -1,5 +1,6 @@
 import {day, fail, statements, text, type FeatureDB, type Row} from './feature-types.ts';
 import {displayHost} from './domain-display.ts';
+import {entryBlocks} from './document-entries.ts';
 
 const millisecondsPerDay = 86400000;
 const datePattern = /^\d{4}-\d{2}-\d{2}$/;
@@ -60,12 +61,11 @@ export async function trafficReport(db: FeatureDB, params: URLSearchParams, user
   const titles = new Map<string, string>();
   for (const doc of visible) {
    const body = JSON.parse(doc.published);
-   for (const block of body.blocks || []) {
-    if (!['profile','collection'].includes(body.layout) || block.type !== 'link') continue;
+   for (const block of entryBlocks(body)) {
     const key = `${doc.id}:${block.id}`;
     const label = visible.length > 1 ? `${doc.name} · ${block.title}` : block.title;
     titles.set(key, label);
-    if (block.enabled !== false && block.url) blocks.push({key, label});
+    blocks.push({key, label});
    }
   }
   const filter = ` AND (?='' OR d.id=?) AND d.deleted_at IS NULL AND d.published IS NOT NULL`;

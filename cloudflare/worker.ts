@@ -1,6 +1,6 @@
 import {features} from './features.ts';
 import {withEnv,type WorkerEnv} from './database.ts';
-import {auth} from './auth.ts';
+import {auth,access} from './auth.ts';
 import * as api from './routes/api.ts';
 import * as redirect from './routes/redirect.ts';
 export default {fetch(req:Request,env:WorkerEnv){return withEnv(env,async()=>{
@@ -18,8 +18,9 @@ export default {fetch(req:Request,env:WorkerEnv){return withEnv(env,async()=>{
   const home=path==='/'?await features.homepage(req):null;
   if(home)response=home;
   else if(path.startsWith('/auth/'))response=await auth(req,path);
+  else if(path==='/api/access')response=await access.handle(req);
   else if(path==='/api/features')response=await features.handle(req);
-  else if(path.startsWith('/api/public/')||path.startsWith('/api/openapi/')||path.startsWith('/p/')||path.startsWith('/partner/')||path.startsWith('/media/')||path.startsWith('/legal/'))response=await features.publicRoute(req);
+  else if(path.startsWith('/api/public/')||path.startsWith('/api/openapi/')||path.startsWith('/p/')||path.startsWith('/partner/')||path.startsWith('/media/')||path.startsWith('/legal/')||path==='/report')response=await features.publicRoute(req);
   else if(path==='/api/workspace')response=req.method==='GET'?await api.GET(req):req.method==='POST'?await api.POST(req):Response.json({error:'不支持的请求方式'},{status:405});
   else if(['/','/admin','/dashboard','/setup','/register'].includes(path)){
    response=await env.ASSETS.fetch(new Request(new URL('/',url),req));

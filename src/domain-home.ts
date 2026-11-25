@@ -1,6 +1,7 @@
 /** Per-domain homepages reuse content drafts/versions; enabling a homepage never changes shortlinks. */
 import {type FeatureContext,type HomepageMetadata,type Row,statements,fail,safeUrl,text,uid} from './feature-types.ts';
-import {cleanProfile,collectionLayout} from './profile-page.ts';
+import {collectionLayout} from './profile-page.ts';
+import {cleanLink3} from './link3-page.ts';
 import {displayHost} from './domain-display.ts';
 import {shareAliasFor} from './share-url.ts';
 
@@ -85,7 +86,7 @@ export function domainHomes(ctx:FeatureContext,publicPage:(req:Request,id:string
    await db.batch(statements);
    return {ok:true,id,enabled:true,origin:domain.origin};
   }
-  const body=cleanProfile(b.body||{});
+  const body=cleanLink3(b.body||{});
   if(!current&&Number((await one('SELECT count(*) n FROM documents WHERE owner_id=? AND deleted_at IS NULL',u.id))?.n)>=200)fail('当前免费内容数量上限为 200 条');
   const id=current?.id||uid(),version=(current?.version||0)+1,content=JSON.stringify(body),enabled=applying||!!saved.enabled;
   const statements=[current?db.prepare('UPDATE documents SET name=?,draft=?,updated_at=? WHERE id=?').bind(body.title,content,now,id):db.prepare('INSERT INTO documents(id,owner_id,kind,name,draft,created_at,updated_at) VALUES (?,?,?,?,?,?,?)').bind(id,u.id,'page',body.title,content,now,now)];
@@ -94,9 +95,9 @@ export function domainHomes(ctx:FeatureContext,publicPage:(req:Request,id:string
   await db.batch(statements);return {ok:true,id,enabled,origin:domain.origin};
  }
  async function homepage(req:Request){
-  const domain=await one('SELECT * FROM domains WHERE origin=?',new URL(req.url).origin);if(!domain)return null;
+  const domain=await one('SELECT d.*,u.enabled owner_enabled FROM domains d LEFT JOIN users u ON u.id=d.owner_id WHERE d.origin=?',new URL(req.url).origin);if(!domain)return null;
   const saved=await config(domain.id);if(!saved.enabled)return null;
-  if(domain.status==='disabled')return new Response('首页已停用',{status:404,headers:{'Cache-Control':'no-store'}});
+  if(domain.status==='disabled'||domain.owner_id&&domain.owner_enabled!==1)return new Response('首页已停用',{status:404,headers:{'Cache-Control':'no-store'}});
   if(saved.mode==='direct'&&saved.redirectUrl){
    const headers={'Cache-Control':'no-store'};
    if(req.method!=='GET'&&req.method!=='HEAD')return new Response(null,{status:405,headers:{...headers,Allow:'GET, HEAD'}});

@@ -2,7 +2,7 @@ import {features} from './feature-instance.ts';
 import {createServer} from 'node:http';
 import {readFile} from 'node:fs/promises';
 import {resolve,extname} from 'node:path';
-import {auth} from './auth.ts';
+import {auth,access} from './auth.ts';
 import * as api from './routes/api.ts';
 import * as redirect from './routes/redirect.ts';
 const port=Number(process.env.PORT||3000),host=process.env.HOST||'0.0.0.0';
@@ -26,8 +26,9 @@ const server=createServer(async(incoming,outgoing)=>{
   const home=url.pathname==='/'?await features.homepage(req):null;
   if(home)result=home;
   else if(url.pathname.startsWith('/auth/'))result=await auth(req,url.pathname,incoming.socket.remoteAddress||'unknown');
+  else if(url.pathname==='/api/access')result=await access.handle(req);
   else if(url.pathname==='/api/features')result=await features.handle(req);
-  else if(url.pathname.startsWith('/api/public/')||url.pathname.startsWith('/api/openapi/')||url.pathname.startsWith('/p/')||url.pathname.startsWith('/partner/')||url.pathname.startsWith('/media/')||url.pathname.startsWith('/legal/'))result=await features.publicRoute(req);
+  else if(url.pathname.startsWith('/api/public/')||url.pathname.startsWith('/api/openapi/')||url.pathname.startsWith('/p/')||url.pathname.startsWith('/partner/')||url.pathname.startsWith('/media/')||url.pathname.startsWith('/legal/')||url.pathname==='/report')result=await features.publicRoute(req);
   else if(url.pathname==='/api/workspace'){
    if(method==='GET')result=await api.GET(req);else if(method==='POST')result=await api.POST(req);else result=Response.json({error:'不支持的请求方式'},{status:405});
   }else if(url.pathname.startsWith('/assets/')){

@@ -1,7 +1,11 @@
 import {createHash,randomBytes,scrypt as scryptCallback,timingSafeEqual} from 'node:crypto';
 import {promisify} from 'node:util';
 import {sqlite,database} from './database.ts';
+import {accessManagement,workspaceIdentity} from './access.ts';
 const scrypt=promisify(scryptCallback);
+export async function encodedPassword(password:string){const salt=randomBytes(16).toString('hex');return salt+':'+((await scrypt(password,salt,64)) as Buffer).toString('hex');}
+export const access=accessManagement(database,sessionUser,encodedPassword);
+export async function workspaceUser(req:Request){return workspaceIdentity(database,sessionUser(req),req);}
 const ttl=7*86400000;
 export function authError(message:string,status=400):never{throw Object.assign(new Error(message),{status});}
 function hash(value:string){return createHash('sha256').update(value).digest('hex');}
@@ -13,7 +17,7 @@ const limits=new Map<string,{n:number,end:number}>();
 function rate(key:string){const now=Date.now();for(const [k,v] of limits)if(v.end<now)limits.delete(k);const state=limits.get(key)||{n:0,end:now+900000};state.n++;limits.set(key,state);if(state.n>20)authError('尝试次数过多，请 15 分钟后重试',429);}
 function cookie(token:string,req:Request,age=604800){return `lw_session=${token}; Path=/; HttpOnly; SameSite=Lax; Max-Age=${age}${new URL(req.url).protocol==='https:'?'; Secure':''}`;}
 function issue(userId:string,req:Request){sqlite.prepare('DELETE FROM sessions WHERE expires<?').run(Date.now());const token=randomBytes(32).toString('hex');sqlite.prepare('INSERT INTO sessions (token_hash,user_id,expires) VALUES (?,?,?)').run(hash(token),userId,Date.now()+ttl);return Response.json({ok:true},{headers:{'Set-Cookie':cookie(token,req),'Cache-Control':'no-store'}});}
-export function sessionUser(req:Request){const token=req.headers.get('cookie')?.match(/(?:^|;\s*)lw_session=([a-f0-9]{64})(?:;|$)/)?.[1];if(!token)authError('请先登录',401);const current=sqlite.prepare('SELECT u.* FROM sessions s JOIN users u ON s.user_id=u.id WHERE s.token_hash=? AND s.expires>?').get(hash(token!),Date.now()) as any;if(!current)authError('登录已过期，请重新登录',401);if(!current.enabled)authError('账号已停用',403);const owner=sqlite.prepare("SELECT value FROM settings WHERE key='owner'").get() as any;current.admin=owner?.value===current.id;return current;}
+export function sessionUser(req:Request){const token=req.headers.get('cookie')?.match(/(?:^|;\s*)lw_session=([a-f0-9]{64})(?:;|$)/)?.[1];if(!token)authError('请先登录',401);const current=sqlite.prepare('SELECT u.* FROM sessions s JOIN users u ON s.user_id=u.id WHERE s.token_hash=? AND s.expires>?').get(hash(token!),Date.now()) as any;if(!current)authError('登录已过期，请重新登录',401);if(!current.enabled)authError('账号已停用',403);const owner=sqlite.prepare("SELECT value FROM settings WHERE key='owner'").get() as any;current.admin=owner?.value===current.id||current.access_role==='admin';return current;}
 export async function auth(req:Request,path:string,clientKey:string){
  if(path==='/auth/status')return Response.json({initialized:initialized(),registrationOpen:(sqlite.prepare("SELECT value FROM settings WHERE key='registration'").get() as any)?.value==='1'},{headers:{'Cache-Control':'no-store'}});
  if(path==='/auth/logout'){

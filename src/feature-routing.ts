@@ -1,6 +1,7 @@
 import {cleanGuideTexts} from './resource-copy.ts';
 import {measurableRequest} from './traffic.ts';
 import {shareAliasFor} from './share-url.ts';
+import {entryClickable} from './document-entries.ts';
 import {type FeatureContext,type Row,statements,fail,safeUrl,text,uid,day,htmlPage,e,js,reply} from './feature-types.ts';
 const encoder=new TextEncoder();
 export const hex=(v:ArrayBuffer)=>Array.from(new Uint8Array(v),x=>x.toString(16).padStart(2,'0')).join('');
@@ -37,7 +38,7 @@ export function routing(ctx:FeatureContext){
  async function settings(){const row=await one("SELECT value FROM settings WHERE key='features'");try{return JSON.parse(row?.value||'{}');}catch{return {};}}
  async function allowedTarget(target:string){const policy=await settings(),host=new URL(safeUrl(target)).hostname;if((policy.blockedDomains||[]).some((h:string)=>host===h||host.endsWith('.'+h)))fail('目标域名已被站点停用',403);return policy;}
  async function owned(u:Row,id:string,deleted=false){const row=await one('SELECT l.*,coalesce(d.public_origin,d.origin) origin,d.origin canonical_origin,d.host,d.status domain_status,u.enabled owner_enabled FROM links l JOIN domains d ON d.id=l.domain_id JOIN users u ON u.id=l.owner_id WHERE l.id=?'+(deleted?'':' AND l.deleted_at IS NULL'),id);if(!row||!u.admin&&row.owner_id!==u.id)fail('链接不存在',404);return row!;}
- async function prepareConfig(u:Row,id:string,input:Row,itemOverride?:Row){const item=itemOverride||await owned(u,id),config=cleanOptions(input);if(config.groupId&&!await one('SELECT id FROM link_groups WHERE id=? AND owner_id=?',config.groupId,item.owner_id))fail('分组不存在');if(config.templateId&&!await one("SELECT id FROM documents WHERE id=? AND owner_id=? AND kind='template' AND published IS NOT NULL AND deleted_at IS NULL",config.templateId,item.owner_id))fail('请选择已发布的模板');for(const t of [...config.targets.map((t:Row)=>t.url),...Object.values(config.devices),...config.rules.map((r:Row)=>r.url),...(config.fallback?[config.fallback]:[])])await allowedTarget(String(t));
+ async function prepareConfig(u:Row,id:string,input:Row,itemOverride?:Row){const item=itemOverride||await owned(u,id),config=cleanOptions(input);if(config.groupId&&!await one('SELECT id FROM link_groups WHERE id=? AND owner_id=?',config.groupId,item.owner_id))fail('分组不存在');if(config.templateId&&config.templateId!=='__link3'&&!await one("SELECT id FROM documents WHERE id=? AND owner_id=? AND kind='template' AND published IS NOT NULL AND deleted_at IS NULL",config.templateId,item.owner_id))fail('请选择已发布的模板');for(const t of [...config.targets.map((t:Row)=>t.url),...Object.values(config.devices),...config.rules.map((r:Row)=>r.url),...(config.fallback?[config.fallback]:[])])await allowedTarget(String(t));
   const previous=await one('SELECT * FROM link_options WHERE link_id=?',id);let password=previous?.password_hash||'',version=previous?.access_version||uid();if(input.clearPassword){password='';version=uid();}if(input.password){if(String(input.password).length<6||String(input.password).length>128)fail('访问密码需为 6–128 位');password=await hashPassword(input.password);version=uid();}
   if (!Object.hasOwn(input,'shareAlias')) config.shareAlias=text(JSON.parse(previous?.config||'{}').shareAlias,255);
   if (config.shareAlias && config.shareAlias!==shareAliasFor(item.canonical_origin)) fail('所选别名不属于这个域名');
@@ -73,7 +74,7 @@ export function routing(ctx:FeatureContext){
      WHERE d.id=? AND d.kind='template' AND d.published IS NOT NULL AND d.deleted_at IS NULL AND u.enabled=1`,token.templateId):null;
     if(token.templateId&&!shared)fail('入口不存在',404);
     const body=JSON.parse(shared?.published||d.published);
-    if(body.layout!==(shared?'collection':'profile')||!body.blocks.some((block:Row)=>block.id===entry&&block.type==='link'&&block.enabled!==false&&block.url))fail('入口不存在',404);
+    if(!entryClickable(body,(body.blocks||[]).find((block:Row)=>block.id===entry)))fail('入口不存在',404);
    }
    const event=(kind:string)=>db.prepare('INSERT INTO document_events(id,document_id,visitor,kind,timestamp,day,verified) SELECT ?,?,?,?,?,?,1 WHERE NOT EXISTS(SELECT 1 FROM document_events WHERE verified=1 AND document_id=? AND visitor=? AND kind=? AND timestamp>?)').bind(uid(),token.id,token.browser,kind,now,today,token.id,token.browser,kind,now-600000);
    await db.batch(entry?[event('arrival'),event('click:'+entry)]:[event('arrival')]);

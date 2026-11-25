@@ -79,7 +79,7 @@ try{
  const homeDraft=await json('/api/features?section=homepage&domainId='+domainId);assert.equal(homeDraft.config.enabled,false);assert.equal(JSON.parse(homeDraft.document.draft).blocks.length,2);
  await feature({action:'homepage.apply',domainId,body:profile});
  const homeResponse=await req('/');assert.equal(homeResponse.status,200);const homeHtml=await homeResponse.text();assert(homeHtml.includes('我的资源小站'));assert(homeHtml.includes('https://example.org/long/path?share=123&amp;pwd=456#files'));assert(homeHtml.includes('&lt;script&gt;unsafe&lt;/script&gt;'));assert(!homeHtml.includes('<script>unsafe</script>'));
- const homeToken=homeHtml.match(/const token="([^"]+)"/)?.[1],entryId=homeHtml.match(/data-entry="([^"]+)"/)?.[1];
+ const homeToken=homeHtml.match(/(?:const token|const documentToken)="([^"]+)"/)?.[1],entryId=homeHtml.match(/data-entry="([^"]+)"/)?.[1];
  assert(homeToken&&entryId);
  const reportPath='/api/features?section=trafficReport';
  const homeReport=reportPath+'&kind=homepages&domain='+domainId+'&id='+homeDraft.document.id;
@@ -207,6 +207,33 @@ try{
  assert((await (await req(sharedPath)).text()).includes('共用资源导航新版'));
  await feature({action:'homepage.disable',domainId});
  console.log('PASS: shared collection template, live updates, draft isolation, independent homepage analytics and existing homepage restoration.');
+
+ // 内置 Link3 资源页 + 举报收集
+ const builtinLink3=await json('/api/workspace',{action:'link.save',domainId,slug:'builtin-link3',title:'内置 Link3 测试',target:'https://example.com/builtin',mode:'page',options:{templateId:'__link3'}});
+ const builtinPath=new URL(builtinLink3.shortUrl).pathname;
+ const builtinHtml=await (await req(builtinPath)).text();
+ assert(builtinHtml.includes('l3-btn')&&builtinHtml.includes('点击获取资源'),'builtin Link3 page renders a target button');
+ assert(builtinHtml.includes('内置 Link3 测试'));
+ assert(builtinHtml.includes('href="/report?url='),'Link3 footer links to the report form');
+ assert(/<div class="l3-short" role="button" tabindex="0" data-copy-url=/.test(builtinHtml),'short link pill copies the page url');
+ assert(builtinHtml.includes('is-bounce'),'buttons bounce on click');
+ assert(!builtinHtml.includes('id="copy"'),'builtin Link3 page has no copy row');
+ console.log('PASS: builtin Link3 resource page renders a single target button, copy controls and a report link.');
+ const reportTarget=origin+builtinPath;
+ assert.equal((await req('/api/public/report',{url:reportTarget,reason:'broken',message:'x'})).status,400,'report message must be long enough');
+ for(let i=0;i<2;i++)assert.equal((await req('/api/public/report',{url:reportTarget,reason:'broken',message:'链接打不开，测试举报 '+i,contact:'tester@example.com'})).status,200);
+ const reports=(await json('/api/features?section=reports')).items;
+ assert.equal(reports.length,2);
+ assert(reports.every(item=>item.url===reportTarget&&item.reason==='broken'));
+ assert.equal((await req('/api/features?section=reports',undefined,memberCookie)).status,403,'ordinary users cannot read reports');
+ assert.equal((await req('/api/features',{action:'report.delete',id:reports[0].id},adminCookie)).status,200);
+ assert.equal((await json('/api/features?section=reports')).items.length,1);
+ assert((await (await req('/report?done=1')).text()).includes('举报已提交'),'success page renders');
+ const formPost=await req('/api/public/report',undefined,'',{method:'POST',headers:{'Content-Type':'application/x-www-form-urlencoded'},body:new URLSearchParams({url:reportTarget,reason:'other',message:'表单原生提交测试'}).toString()});
+ assert.equal(formPost.status,303,'native form post redirects to the success page');
+ assert((formPost.headers.get('location')||'').startsWith('/report?done=1'));
+ assert((await (await req('/report?error='+encodeURIComponent('测试错误提示'))).text()).includes('测试错误提示'),'error banner renders');
+ console.log('PASS: public report form stores reports, admin can list and delete them, ordinary users are denied.');
  console.log('PASS: domain home drafts/apply/disable, direct homepage, exact URLs, HEAD, independent domains, ownership, admin access and existing redirects.');
  const chineseOrigin=new URL('https://大人.top').origin,wwwOrigin=new URL('https://www.大人.top').origin;
  await json('/api/workspace',{action:'domain.save',origin:chineseOrigin,name:'中文域名'});

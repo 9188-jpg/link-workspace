@@ -1,4 +1,7 @@
 import {database,getEnv} from './database.ts';
+import {accessManagement,workspaceIdentity} from '../src/access.ts';
+export const access=accessManagement(database,sessionUser,encodedPassword);
+export async function workspaceUser(req:Request){return workspaceIdentity(database,await sessionUser(req),req);}
 // Cloudflare production rejects PBKDF2 above 100,000 iterations, unlike local workerd.
 // A separate secret peppers the derived hash, so a database dump alone cannot verify guesses.
 const ttl=7*86400000,iterations=100000,passwordFormat='pbkdf2-hmac';
@@ -23,7 +26,7 @@ async function rate(key:string){const now=Date.now(),bucket=Math.floor(now/90000
 }
 function cookie(token:string,req:Request,age=604800){return `lw_session=${token}; Path=/; HttpOnly; SameSite=Lax; Max-Age=${age}${new URL(req.url).protocol==='https:'?'; Secure':''}`;}
 async function issue(userId:string,req:Request){const token=random(32);await run('DELETE FROM sessions WHERE expires<?',Date.now());await run('INSERT INTO sessions (token_hash,user_id,expires) VALUES (?,?,?)',await digest(token),userId,Date.now()+ttl);return Response.json({ok:true},{headers:{'Set-Cookie':cookie(token,req),'Cache-Control':'no-store'}});}
-export async function sessionUser(req:Request){const token=req.headers.get('cookie')?.match(/(?:^|;\s*)lw_session=([a-f0-9]{64})(?:;|$)/)?.[1];if(!token)fail('请先登录',401);const current=await one("SELECT u.*,(SELECT value FROM settings WHERE key='owner') _workspace_owner FROM sessions s JOIN users u ON s.user_id=u.id WHERE s.token_hash=? AND s.expires>?",await digest(token!),Date.now());if(!current)fail('登录已过期，请重新登录',401);if(!current.enabled)fail('账号已停用',403);current.admin=current._workspace_owner===current.id;delete current._workspace_owner;return current;}
+export async function sessionUser(req:Request){const token=req.headers.get('cookie')?.match(/(?:^|;\s*)lw_session=([a-f0-9]{64})(?:;|$)/)?.[1];if(!token)fail('请先登录',401);const current=await one("SELECT u.*,(SELECT value FROM settings WHERE key='owner') _workspace_owner FROM sessions s JOIN users u ON s.user_id=u.id WHERE s.token_hash=? AND s.expires>?",await digest(token!),Date.now());if(!current)fail('登录已过期，请重新登录',401);if(!current.enabled)fail('账号已停用',403);current.admin=current._workspace_owner===current.id||current.access_role==='admin';delete current._workspace_owner;return current;}
 export async function auth(req:Request,path:string){
  if(path==='/auth/status')return Response.json({initialized:await initialized(),registrationOpen:(await one("SELECT value FROM settings WHERE key='registration'"))?.value==='1'},{headers:{'Cache-Control':'no-store'}});
  if(path==='/auth/logout'){

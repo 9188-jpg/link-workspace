@@ -1,10 +1,22 @@
+import {workspaceFetch,validateTeamSelection} from './workspace-request';
 import {bootstrapWorkspace} from './workspace-loader';
 import React,{useEffect,useState} from 'react';
 import {createRoot} from 'react-dom/client';
 import Workspace from './workspace';
 import './style.css';
+
+// 文字输入框：鼠标左键双击 = 全选整个值，方便复制/替换
+const SELECTABLE_INPUT_TYPES = new Set(['', 'text', 'url', 'email', 'search', 'tel', 'password', 'number', 'date', 'datetime-local', 'month', 'week', 'time']);
+function selectAllOnDoubleClick(event: MouseEvent) {
+ const target = event.target as HTMLElement | null;
+ if (target instanceof HTMLTextAreaElement) { target.select(); return; }
+ if (!(target instanceof HTMLInputElement)) return;
+ if (!SELECTABLE_INPUT_TYPES.has((target.type || 'text').toLowerCase())) return;
+ target.select();
+}
+if (typeof document !== 'undefined') document.addEventListener('dblclick', selectAllOnDoubleClick, true);
 function App(){const [state,setState]=useState<any>(null),[error,setError]=useState(''),[busy,setBusy]=useState(false),[form,setForm]=useState({username:'',password:'',confirm:'',token:''}),[mode,setMode]=useState(location.pathname==='/register'?'register':'login');
- useEffect(()=>{const controller=new AbortController();async function load(){try{const status=await bootstrapWorkspace(fetch,controller.signal);if(controller.signal.aborted)return;if(!status.authorized&&!status.initialized)setMode('setup');setState(status);}catch{if(!controller.signal.aborted){setError('服务连接失败，请刷新重试');setState({});}}}load();return()=>controller.abort();},[]);
+ useEffect(()=>{const controller=new AbortController();async function load(){try{await validateTeamSelection();const status=await bootstrapWorkspace(workspaceFetch,controller.signal);if(controller.signal.aborted)return;if(!status.authorized&&!status.initialized)setMode('setup');setState(status);}catch{if(!controller.signal.aborted){setError('服务连接失败，请刷新重试');setState({});}}}load();return()=>controller.abort();},[]);
  if(state?.authorized)return <Workspace initialSnapshot={state.initial} initialScope={state.scope}/>;
  const setup=mode==='setup',register=mode==='register';
  async function submit(e:React.FormEvent){e.preventDefault();setError('');if((setup||register)&&form.password!==form.confirm){setError('两次输入的密码不一致');return;}setBusy(true);try{const r=await fetch('/auth/'+mode,{method:'POST',headers:{'Content-Type':'application/json','X-Requested-With':'link-workspace'},body:JSON.stringify(form)}),data=await r.json() as any;if(!r.ok)throw new Error(data.error||'操作失败');if(data.pending){setError('账号已创建，请等待管理员启用后登录。');setMode('login');return;}location.assign('/admin');}catch(e:any){setError(e.message);}finally{setBusy(false);}}
